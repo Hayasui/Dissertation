@@ -1,187 +1,156 @@
-# Steam Data Collector Documentation
+# Steam Game Dataset Variables Documentation
 
-*by Huixian Chen*
+## Overview
 
-## Executive Summary
+This document provides a comprehensive explanation of the variables in the `steam_games_data.csv` dataset, which contains information about Steam games collected using the updated `steam_data_collector` script. The dataset focuses on game characteristics, localisation status (particularly Chinese), pricing, and user reviews across different languages. The data is available in both CSV format and as an R data file (RDS) created using the `csv_to_rds.R` script.
 
-The Steam Data Collector is a comprehensive tool that extracts, processes, and analyses game data from the Steam platform using its API. The script efficiently identifies genuine games, collects detailed metadata, and organises results for research purposes. Special attention is given to language localisation (particularly Chinese), review sentiment analysis across different languages, and user-defined tags that provide richer categorisation than official genres.
+## Data Collection Methodology
 
-## 1. Technical Requirements
+The data was collected using the Steam Web API with the following methodology:
 
-### 1.1 Software Requirements
+-   Multiple API keys were used to work within rate limits
+-   Caching mechanisms implemented to prevent redundant API calls
+-   A simple three-step filtering approach to identify genuine games:
+    1. First checking if total review number is no less than 100 (reduced from previous 200 threshold)
+    2. Checking if the app has required gaming tags (Single-player, Multi-player, PvP, etc.)
+    3. Excluding apps with specific non-game tags (Downloadable Content, Demos, Soundtracks, etc.)
+-   Only games released since 2010 were included
+-   Special attention to language support, particularly Chinese localisation
+-   Review data collected for multiple languages (English, Simplified Chinese)
 
--   **Python 3.6+** with the following packages:
-    -   requests: For API calls and web scraping
-    -   pandas: For data manipulation and exporting
-    -   concurrent.futures: For parallel processing
-    -   typing: For type annotations
-    -   Other standard libraries: time, json, os, pickle, re, subprocess, sys, hashlib, threading, datetime
--   **R 4.x+** (optional but recommended for RDS file generation)
-    -   The script expects R to be installed at `C:\PROGRA~1\R\R-44~1.3\bin\x64\Rscript.exe` by default but will attempt to find it in the system PATH if not present at the specified location
+## R Data Format Conversion
 
-### 1.2 API Authentication
+The dataset has been converted from CSV to RDS format using the `csv_to_rds.R` script, which offers several advantages for R users:
 
--   **Steam API Keys**: The script uses multiple API keys to handle rate limiting and API quotas. By default, it includes placeholder API keys which should be replaced with your own valid keys in a production environment. You can get a valid key from [Steam Community :: Steam Web API Key](https://steamcommunity.com/dev/apikey)
+-   **Improved Data Types**: The R script properly converts list columns (genres, developers, publishers, user_tags) from string representation to native R lists
+-   **International Character Support**: Ensures proper encoding of international characters, particularly Chinese text
+-   **Efficient Storage**: RDS format is more efficient for R users as it preserves R-specific data types and structures
+-   **Direct Loading**: Can be loaded directly into R using the `readRDS()` function without needing to specify column types
 
-### 1.3 System Requirements
+To use the RDS file in R:
 
--   **Storage Space**: Sufficient storage to accommodate the cache directory and output files
--   **Memory**: At least 4GB RAM recommended for processing large datasets
--   **Network Connection**: Reliable internet connection for API calls
-
-## 2. Research Purpose
-
-The primary purpose of this script is to collect comprehensive data about Steam games for research and analysis purposes. It's particularly designed to investigate:
-
-1.  **Game Localisation**: How games support different languages, with special focus on Chinese (both Simplified and Traditional) compared to English
-2.  **Review Sentiment Analysis**: How reviews' number and ratio varies across language communities
-3.  **Pricing Differences**: How games are priced in different regions (USD vs CNY)
-4.  **Game Popularity**: Current player counts and total review volume
-5.  **Game Categorisation**: Collection of user-defined tags for more nuanced classification of games beyond publisher-defined genres
-
-## 3. Data Collection Methodology
-
-### 3.1 Filtering Criteria
-
-The script employs sophisticated filtering to identify genuine games:
-
--   **Name-based Filtering**: Uses regex patterns to identify and exclude DLCs, soundtracks, tools, etc.
--   **Whitelist Protection**: Maintains a whitelist of games that might be incorrectly filtered
--   **API Relationship Data**: Checks API metadata to identify if an app is a game or DLC
--   **Review Volume Threshold**: Requires a minimum number of reviews (200 by default)
--   **Release Date Filtering**: Excludes games released before 2010
-
-### 3.2 User-Defined Tags Collection
-
-The script collects user-defined tags from multiple sources to ensure comprehensive categorisation data:
-
-1.  **API Categories**: Collects basic categories from the Steam API
-2.  **API Tags Field**: Extracts tags from the Steam API tags field, handling both dictionary and list formats
-3.  **Store Page Scraping**: When API data is insufficient (fewer than 5 tags), the script attempts to extract the "Popular user-defined tags" section from the game's Steam store page
-4.  **Tag Deduplication**: Removes duplicate tags while preserving the original order, ensuring the most relevant tags appear first
-
-This enhanced tag collection provides much richer categorisation than the limited publisher-defined genres, offering valuable insights into how the community perceives and classifies games.
-
-## 4. Script Workflow
-
-The script operates through the following sequential steps:
-
-### 4.1 Initialisation
-
--   Sets up output directories and cache structure
--   Initialises the API key manager and rate limiter
--   Loads checkpoint data if resuming a previous run
-
-### 4.2 Testing Phase
-
--   Performs a series of tests to verify API connectivity and functionality
--   Checks caching mechanism, CSV deduplication, and API key rotation
--   Tests user tag extraction functionality
--   Waits for user confirmation before proceeding to the main collection phase
-
-### 4.3 App List Retrieval
-
--   Fetches the complete list of apps available on Steam
--   Applies initial filtering based on name patterns to exclude obvious non-games
--   Logs filtering decisions for later analysis
-
-### 4.4 Detailed Game Processing
-
-For each potential game, checks:
-
--   Review count to meet minimum threshold
--   App type data from the API to confirm it's a game
--   Release date to ensure it meets the year criteria
-
-For each qualifying game, collects:
-
--   Basic metadata (name, developers, publishers, release date, etc.)
--   Supported languages with detailed localisation level
--   English and Chinese name variations
--   Pricing in USD and CNY
--   Current player count
--   Review statistics for English, Simplified Chinese, and Traditional Chinese
--   User-defined tags from multiple sources (API categories, tags field, and store page HTML when necessary)
-
-### 4.5 Data Storage
-
--   Incrementally saves data to CSV to prevent data loss
--   Implements deduplication to handle duplicate entries
--   Creates checkpoint files to support resuming interrupted runs
--   Tracks API usage to manage rate limits and key rotation
-
-### 4.6 Data Export
-
--   Exports data in multiple formats:
-    -   CSV: For general use and Excel compatibility
-    -   Feather: For high-performance data exchange with R
-    -   RDS: Native R format for statistical analysis
--   Generates an R script for immediate data import and basic analysis
-
-## 5. Output Files and Directory Structure
-
-After running the script, your working directory will contain the following files and folders:
-
-### 5.1 Main Output Files
-
--   **steam_games_data.csv**: Primary results file in CSV format with UTF-8-BOM encoding
--   **steam_games_data_final.csv**: Final processed dataset after complete run
--   **steam_games_data_final.feather**: Data in Feather format for R integration
--   **steam_games_data_final.rds**: Data in native R format (if R is available)
--   **steam_games_data_final_import.R**: Generated R script for data import and analysis
-
-### 5.2 Process Management Files
-
--   **checkpoint.pkl**: Binary checkpoint file to track processing progress
--   **processed_games.json**: JSON list of successfully processed games
--   **api_usage.json**: Tracking data for API key usage and rotation
-
-### 5.3 Logging Files
-
--   **dlc_filtering_log.json**: Log of apps identified as DLCs and excluded
--   **keyword_filtering_log.json**: Log of apps filtered based on name patterns
-
-### 5.4 Directories
-
--   **api_cache/**: Directory containing cached API responses
-    -   Organised by endpoint subdirectories for efficient retrieval
-    -   Uses SHA-256 hashing for cache key generation
-
-## 6. Usage Instructions
-
-### 6.1 Command-Line Arguments
-
-The script supports several command-line arguments:
-
--   **--app-id**: Process a specific game by its Steam App ID
--   **--app-name**: Specify a name for the game (will be fetched if not provided)
--   **--keep-cache**: Keep existing cache for the app ID
--   **--quiet**: Disable verbose logging
--   **--deduplicate**: Deduplicate the CSV file without processing games
-
-### 6.2 Example Usage
-
-```
-python steam_data_collector_multikey_v7.py --app-id 2001120
+```r
+steam_data <- readRDS("steam_games_data.rds")
 ```
 
-## 7. Technical Features
+## Dataset Variables
 
-### 7.1 Performance Optimisations
+The dataset contains 35 variables across the games. Below is a detailed explanation of each variable:
 
--   **Parallel Processing**: Implements adaptive parallel processing with dynamic worker adjustment based on success rates
--   **Caching**: Comprehensive caching system to prevent redundant API calls
--   **API Key Rotation**: Automatically rotates between multiple API keys to avoid rate limiting
--   **Incremental Storage**: Saves results incrementally to prevent data loss
--   **Memory-Efficient Batching**: Processes games in batches to maintain reasonable memory usage
+### Game Identification
 
-### 7.2 Enhanced Functionality
+| Variable       | Type    | Description                          |
+|----------------|---------|--------------------------------------|
+| `app_id`       | Integer | Unique Steam application identifier  |
+| `english_name` | String  | Game title in English                |
+| `chinese_name` | String  | Game title in Chinese (if available) |
 
--   **Enhanced Language Detection**: Special handling for language codes and audio support
--   **Date Parsing**: Handles various date formats from the Steam API
--   **Duplicate Prevention**: Intelligent deduplication of results
--   **Rate Limiting**: Adaptive rate limiting based on API response codes
--   **Configurable Filtering**: Detailed regex patterns for non-game detection
--   **Multi-Source Tag Collection**: Extracts user-defined tags from API data and falls back to web scraping when necessary
--   **Tag Deduplication**: Ensures unique tag collections while preserving original ordering for relevance
--   **British English Support**: All output messages and documentation use British English conventions
+### Game Creators
+
+| Variable     | Type          | Description                               |
+|--------------|---------------|-------------------------------------------|
+| `developers` | String/List\* | List of development companies/individuals |
+| `publishers` | String/List\* | List of publishing companies              |
+
+\*In the RDS file, these are converted to native R lists
+
+### Game Metadata
+
+| Variable               | Type          | Description                                                    |
+|------------------------|---------------|----------------------------------------------------------------|
+| `release_date`         | String        | Date when the game was released (YYYY-MM-DD format)            |
+| `supported_languages`  | String        | Full list of languages supported by the game                   |
+| `genres`               | String/List\* | Game genres as defined by Steam                                |
+| `user_tags`            | String/List\* | User-defined tags describing the game                          |
+| `current_player_count` | Integer       | Number of players currently playing at time of data collection |
+
+\*In the RDS file, these are converted to native R lists
+
+### Pricing Information
+
+| Variable    | Type    | Description                                                    |
+|-------------|---------|----------------------------------------------------------------|
+| `price_usd` | String  | Price in US dollars (numeric string without currency symbol)   |
+| `price_cny` | String  | Price in Chinese Yuan (numeric string without currency symbol) |
+| `is_free`   | Boolean | Whether the game is free-to-play (`True`/`False`)              |
+
+### Language Support
+
+| Variable                                 | Type    | Description                                        |
+|------------------------------------------|---------|----------------------------------------------------|
+| `chinese_simplified_interface_subtitles` | Boolean | Game includes Simplified Chinese UI/text/subtitles |
+| `chinese_simplified_audio`               | Boolean | Game includes Simplified Chinese voice acting      |
+| `english_interface_subtitles`            | Boolean | Game includes English UI/text/subtitles            |
+| `english_audio`                          | Boolean | Game includes English voice acting                 |
+
+### Global Review Metrics
+
+| Variable         | Type    | Description                                           |
+|------------------|---------|-------------------------------------------------------|
+| `total_reviews`  | Integer | Total number of user reviews across all languages     |
+| `total_positive` | Integer | Total number of positive reviews across all languages |
+| `total_negative` | Integer | Total number of negative reviews across all languages |
+
+### Simplified Chinese Review Metrics
+
+| Variable                  | Type    | Description                                                 |
+|---------------------------|---------|-------------------------------------------------------------|
+| `schinese_reviews`        | Integer | Total number of Simplified Chinese reviews                  |
+| `schinese_positive`       | Integer | Number of positive Simplified Chinese reviews               |
+| `schinese_negative`       | Integer | Number of negative Simplified Chinese reviews               |
+| `schinese_positive_ratio` | Float   | Ratio of positive to total Simplified Chinese reviews (0-1) |
+
+### English Review Metrics
+
+| Variable                 | Type    | Description                                      |
+|--------------------------|---------|--------------------------------------------------|
+| `english_reviews`        | Integer | Total number of English reviews                  |
+| `english_positive`       | Integer | Number of positive English reviews               |
+| `english_negative`       | Integer | Number of negative English reviews               |
+| `english_positive_ratio` | Float   | Ratio of positive to total English reviews (0-1) |
+
+### Other Reviews
+
+| Variable        | Type    | Description                                                                                   |
+|-----------------|---------|-----------------------------------------------------------------------------------------------|
+| `other_reviews` | Integer | Number of reviews in languages other than English, Simplified Chinese, or Traditional Chinese |
+
+## Data Filtering Criteria
+
+The dataset was created with the following simplified filtering criteria:
+
+1. **Review Count Threshold**: Only games with at least 100 total reviews were included (reduced from previous 200 threshold)
+
+2. **Required Gaming Tags**: Games must have at least one of these gaming-related tags:
+   - Single-player
+   - Multi-player (or Multiplayer)
+   - PvP
+   - Online PvP
+   - Online Co-op
+
+3. **Exclusion Tags**: Games were excluded if they contained any of these non-game tags:
+   - Downloadable Content
+   - Demos
+   - Soundtracks
+   - Playtests
+   - Videos
+   - Mods
+   - Software
+   - Utilities
+
+4. **Additional Filters**:
+   - Games must have a valid release date from 2010 onwards
+   - Games must have valid genre information
+
+This simplified approach ensures that the dataset contains actual playable games rather than other types of Steam content while removing complex regex-based filtering and relationship checks from previous versions.
+
+## Technical Notes
+
+-   In the CSV file, list fields (developers, publishers, genres, user_tags) are stored as comma-separated strings
+-   In the RDS file, these list fields are properly converted to R list objects
+-   Boolean values are represented as `True`/`False`
+-   Price fields may contain "Free" for free-to-play games or "Unknown" if price data couldn't be retrieved
+-   Positive ratio fields range from 0-1 (multiply by 100 for percentage)
+-   Game names in Chinese may be null if the game doesn't have a Chinese store page
+-   The data collection focused particularly on Chinese localisation and review sentiment, allowing for comparison between different language communities
+-   The RDS conversion ensures proper handling of UTF-8 encoding for international characters
