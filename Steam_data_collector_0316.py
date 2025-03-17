@@ -15,9 +15,9 @@ from typing import List, Dict, Any, Tuple, Set
 
 # Define multiple API keys
 API_KEYS = [
-    "K1",          # Key 1
-    "K2",          # Key 2
-    "K3"           # Key 3
+    "5B805BF4D42971025B6E91EA1147D309",          # Key 1
+    "67B0C7FF51D2E02FFB42EED5CE4B8C00",          # Key 2
+    "CDAFAAA6E197BAAF9FCC94AB6DFD3352"           # Key 3
 ]
 
 # Create output directory
@@ -310,10 +310,20 @@ def deduplicate_csv_file(csv_path):
         if not os.path.exists(csv_path):
             print(f"CSV file {csv_path} does not exist. Nothing to deduplicate.")
             return False
+        
+        # Add check for empty file
+        if os.path.getsize(csv_path) == 0:
+            print(f"CSV file {csv_path} is empty. Skipping deduplication.")
+            return False
             
         # Read the CSV file
         df = pd.read_csv(csv_path, encoding='utf-8-sig')
         original_rows = len(df)
+
+        # Handle empty dataframe
+        if df.empty:
+            print(f"CSV file {csv_path} is empty. Skipping deduplication.")
+            return False
         
         # Convert app_id to string for consistent comparison
         df['app_id'] = df['app_id'].astype(str)
@@ -975,12 +985,12 @@ def process_single_game(app_id, app_name):
         'app_id': app_id,
         'english_name': name,
         'chinese_name': chinese_name,
-        'developers': data.get('developers', ['Unknown']),
-        'publishers': data.get('publishers', ['Unknown']),
+        'developers': data.get('developers', ['Unknown']),  # Ensure list exists
+        'publishers': data.get('publishers', ['Unknown']),  # Ensure list exists
         'release_date': release_date.strftime("%Y-%m-%d") if release_date else None,
         'supported_languages': supported_languages,
-        'genres': genres,
-        'user_tags': user_tags,
+        'genres': genres if genres else ['Unknown'],  # Ensure non-empty list
+        'user_tags': user_tags if user_tags else ['No tags'],  # Ensure non-empty list
         'price_usd': price_usd,
         'price_cny': price_cny,
         'is_free': is_free,
@@ -1016,9 +1026,31 @@ def process_single_game(app_id, app_name):
 # Save data in R-friendly formats
 def save_data_for_r(data, base_filename):
     """Save data in R-friendly formats with optimised memory usage."""
+    # Convert base_filename to use forward slashes for R compatibility
+    base_filename_forward = base_filename.replace("\\", "/")
+
     # Create DataFrame
     df = pd.DataFrame(data)
+
+    # Check if DataFrame is empty before proceeding
+    if df.empty:
+        print(f"Warning: Empty dataframe, creating minimal files at {base_filename}")
+        # Create empty files with headers
+        empty_df = pd.DataFrame(columns=['app_id', 'english_name', 'chinese_name', 'developers', 
+                                        'publishers', 'genres', 'user_tags'])
+        empty_df.to_csv(f"{base_filename}.csv", index=False, encoding='utf-8-sig')
+        print(f"Created empty CSV file: {base_filename}.csv")
+        return
     
+    # Ensure required columns exist with proper types
+    list_columns = ['developers', 'publishers', 'genres', 'user_tags']
+    for col in list_columns:
+        if col not in df.columns:
+            df[col] = df.get(col, [[]]*len(df))  # Empty lists if missing
+        # Convert to list type if needed
+        if not isinstance(df[col].iloc[0], list):
+            df[col] = df[col].apply(lambda x: x if isinstance(x, list) else [x])
+
     # Deduplicate based on app_id (keep the last occurrence)
     if 'app_id' in df.columns and not df.empty:
         df['app_id'] = df['app_id'].astype(str)  # Ensure app_id is string for comparison
@@ -1050,60 +1082,45 @@ def save_data_for_r(data, base_filename):
 Sys.setlocale("LC_ALL", "en_US.UTF-8")
 options(encoding = "UTF-8")
 
-# First install required packages if needed
+# Install required packages if needed
 if (!require("arrow")) install.packages("arrow")
 if (!require("tidyverse")) install.packages("tidyverse")
 
-# Import from Feather format (preferred method)
 library(arrow)
 library(tidyverse)
 
-# Import the data - Arrow preserves list columns directly
-steam_data <- read_feather("{base_filename}.feather")
-
-# Ensure that list columns are properly preserved for developers, publishers, genres, and user_tags
-steam_data <- steam_data %>%
-  mutate(
-    developers = as.list(developers),
-    publishers = as.list(publishers),
-    genres = as.list(genres),
-    user_tags = as.list(user_tags)
-  )
-
-# Save as RDS file (native R format)
-saveRDS(steam_data, file = "{base_filename}.rds")
-cat("Data saved as RDS file: {base_filename}.rds\\n")
-
-# Display the first few rows
-print(head(steam_data))
-
-# Basic summary
-print(summary(steam_data))
-
-# Example analysis focusing on Chinese localisation levels
-localisation_analysis <- steam_data %>%
-  mutate(
-    localisation_level = case_when(
-      chinese_simplified_interface_subtitles & chinese_simplified_audio ~ "Full Localisation (UI/Text + Audio)",
-      chinese_simplified_interface_subtitles ~ "Partial Localisation (UI/Text only)",
-      TRUE ~ "No Chinese Localisation"
+tryCatch({{
+  # Import from Feather format
+  steam_data <- read_feather("{base_filename_forward}.feather")
+  
+  # 1. Ensure required columns exist
+  required_columns <- c('developers', 'publishers', 'genres', 'user_tags')
+  for(col in required_columns) {{
+    if(!col %in% names(steam_data)) {{
+      steam_data[[col]] <- list(character(0))
+    }}
+  }}
+  
+  # 2. Convert columns to proper list types
+  steam_data <- steam_data %>%
+    mutate(
+      developers = map(developers, ~ if(length(.x) > 0) .x else list("Unknown")),
+      publishers = map(publishers, ~ if(length(.x) > 0) .x else list("Unknown")),
+      genres = map(genres, ~ if(length(.x) > 0) .x else list("Unknown")),
+      user_tags = map(user_tags, ~ if(length(.x) > 0) .x else list("No tags"))
     )
-  ) %>%
-  group_by(localisation_level) %>%
-  summarize(
-    game_count = n(),
-    avg_chinese_rating = mean(schinese_positive_ratio, na.rm = TRUE),
-    avg_english_rating = mean(english_positive_ratio, na.rm = TRUE),
-    avg_sentiment_diff = mean(schinese_positive_ratio - english_positive_ratio, na.rm = TRUE)
-  )
+  
+  # 3. Save as RDS
+  saveRDS(steam_data, file = "{base_filename_forward}.rds")
+  cat("Successfully saved RDS file: {base_filename_forward}.rds\\n")
+  
+}}, error = function(e) {{
+  cat("Error:", e$message, "\\n")
+  traceback()
+  quit(status = 1)
+}})
 
-print(localisation_analysis)
-
-# Confirm that list columns are properly working in R
-cat("\\nTest access to list values in first row:\\n")
-cat("First developer in first row:", steam_data$developers[[1]][1], "\\n")
-cat("First genre in first row:", steam_data$genres[[1]][1], "\\n")
-cat("First user tag in first row:", steam_data$user_tags[[1]][1], "\\n")
+cat("R data conversion complete!\\n")
 """)
         
         # Automatically run the R script to generate RDS file
@@ -1242,7 +1259,7 @@ def save_checkpoint(processed_app_ids, current_index, results):
         json.dump(key_manager.get_usage_stats(), f, ensure_ascii=False, indent=4)
     
     # Save the current results to final output files
-    output_file = os.path.join(output_dir, "steam_data")
+    output_file = os.path.join(output_dir, "steam_data").replace("\\", "/")
     save_data_for_r(results, output_file)
     
     print(f"Checkpoint saved. Processed {len(processed_app_ids)} games, {len(results)} met criteria.")
