@@ -15,9 +15,9 @@ from typing import List, Dict, Any, Tuple, Set
 
 # Define multiple API keys
 API_KEYS = [
-    "5B805BF4D42971025B6E91EA1147D309",          # Key 1
-    "67B0C7FF51D2E02FFB42EED5CE4B8C00",          # Key 2
-    "CDAFAAA6E197BAAF9FCC94AB6DFD3352"           # Key 3
+    "K1",          # Key 1
+    "K2",          # Key 2
+    "K3"           # Key 3
 ]
 
 # Create output directory
