@@ -16,9 +16,9 @@ from bs4 import BeautifulSoup
 
 # Define multiple API keys
 API_KEYS = [
-    "K1",          # Key 1
-    "K2",          # Key 2
-    "K3"           # Key 3
+    "5B805BF4D42971025B6E91EA1147D309",          # Key 1
+    "67B0C7FF51D2E02FFB42EED5CE4B8C00",          # Key 2
+    "CDAFAAA6E197BAAF9FCC94AB6DFD3352"           # Key 3
 ]
 
 # Create output directory
@@ -223,46 +223,64 @@ def cached_api_request(url, params, cache_duration_hours=24):
     actual_params = params.copy()
     actual_params['key'] = key_manager.get_current_key()
     
-    # Make the actual API request
-    try:
-        response = requests.get(url, params=actual_params)
-        key_manager.record_api_call()
-        
-        # Handle rate limiting with 429 error (TOO MANY REQUESTS)
-        if response.status_code == 429:
-            print(f"Rate limit exceeded (429) for key {key_manager.get_current_key()[:8]}...")
-            # Apply penalty to force key rotation
-            current_key = key_manager.get_current_key()
-            key_manager.call_counters[current_key] += 1000  # Penalty count to force rotation
-            key_manager.rotate_key()
-            print(f"Rotated to key: {key_manager.get_current_key()[:8]}...")
-            time.sleep(2.0)  # Add additional delay after rate limit
-            return None
-        
-        # Only cache successful responses
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    json.dump(data, f)
-                # Insert delay for rate limiting
-                time.sleep(1.0)
-                return data
-            except Exception as e:
-                print(f"Error caching response: {e}")
-                # Insert delay for rate limiting
-                time.sleep(1.0)
-                return response.json()
-        else:
-            print(f"HTTP error {response.status_code} for URL {url}")
-            # Insert delay for rate limiting
-            time.sleep(1.0)
-            return None
+    # Make the actual API request with retry function
+    max_retries = 3
+    for retry in range(max_retries):
+        try:
+            response = requests.get(url, params=actual_params, timeout=10)
+            key_manager.record_api_call()
             
-    except Exception as e:
-        print(f"Request error: {e}")
-        time.sleep(1.0)
-        return None
+            # Handle rate limiting with 429 error (TOO MANY REQUESTS)
+            if response.status_code == 429:
+                print(f"Rate limit exceeded (429) for key {key_manager.get_current_key()[:8]}...")
+                # Apply penalty to force key rotation
+                current_key = key_manager.get_current_key()
+                key_manager.call_counters[current_key] += 1000  # Penalty count to force rotation
+                key_manager.rotate_key()
+                print(f"Rotated to key: {key_manager.get_current_key()[:8]}...")
+                time.sleep(2.0)  # Add additional delay after rate limit
+                
+                # Instead of returning None, retry with the new key if retries remain
+                if retry < max_retries - 1:
+                    print(f"Retrying with new API key ({retry+1}/{max_retries})...")
+                    continue
+                else:
+                    return None
+            
+            # Only cache successful responses
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(data, f)
+                    # Insert delay for rate limiting
+                    time.sleep(1.0)
+                    return data
+                except Exception as e:
+                    print(f"Error caching response: {e}")
+                    # Insert delay for rate limiting
+                    time.sleep(1.0)
+                    return response.json()
+            else:
+                print(f"HTTP error {response.status_code} for URL {url}")
+                # Try again if retries remain
+                if retry < max_retries - 1:
+                    print(f"Retrying after HTTP error ({retry+1}/{max_retries})...")
+                    time.sleep(2 * (retry + 1))  # Exponential backoff
+                    continue
+                else:
+                    # Insert delay for rate limiting
+                    time.sleep(1.0)
+                    return None
+                
+        except Exception as e:
+            if retry < max_retries - 1:
+                print(f"Retrying API call after error ({retry+1}/{max_retries}): {e}")
+                time.sleep(2 * (retry + 1))  # Exponential backoff
+            else:
+                print(f"API call failed after {max_retries} attempts: {e}")
+                time.sleep(1.0)
+                return None
 
 # Unified Date Parsing
 def parse_steam_date(date_str):
@@ -614,7 +632,10 @@ def check_app_relationship(app_id):
     details = get_game_details(app_id)
     
     if not details or str(app_id) not in details or not details[str(app_id)]['success']:
-        return (True, "Could not get app details", None)
+        # CHANGED: Return False instead of True when API fails
+        # This allows games to pass through when API issues occur
+        print(f"Warning: Could not get app details for {app_id}, assuming it's a game")
+        return (False, "Could not verify game status due to API issues", None)
     
     app_data = details[str(app_id)]['data']
     reasons = []
@@ -629,14 +650,7 @@ def check_app_relationship(app_id):
             reasons.append(f"App has type '{app_type}' (not 'game')")
             return (True, "; ".join(reasons), details)
     
-    # Check 2: Check for 'fullgame' reference (common in DLCs)
-    if 'fullgame' in app_data:
-        fullgame_id = app_data['fullgame']['appid']
-        fullgame_name = app_data['fullgame']['name']
-        reasons.append(f"App is related to full game '{fullgame_name}' (ID: {fullgame_id})")
-        return (True, "; ".join(reasons), details)
-    
-    # Check 3: Check for DLC-like categories
+    # Check 2: Check for DLC-like categories
     dlc_categories = ['downloadable content', 'dlc']
     if 'categories' in app_data:
         for category in app_data['categories']:
@@ -644,7 +658,7 @@ def check_app_relationship(app_id):
                 reasons.append(f"App has DLC-related category: '{category['description']}'")
                 return (True, "; ".join(reasons), details)
 
-    # Check 4: Required app check (DLCs often have required apps)
+    # Check 3: Required app check (DLCs often have required apps)
     if app_data.get('required_age', 0) == 0 and len(app_data.get('developers', [])) == 0:
         if any(pattern in app_data.get('name', '').lower() for pattern in ['dlc', 'pack', 'expansion']):
             reasons.append("App has DLC-like name with no age requirement and no developers")
