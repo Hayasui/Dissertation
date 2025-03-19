@@ -40,7 +40,6 @@ PROCESSED_GAMES_FILE = os.path.join(output_dir, "processed_games.json")
 API_USAGE_FILE = os.path.join(output_dir, "api_usage.json")
 CSV_RESULTS_FILE = os.path.join(output_dir, "steam_data.csv")
 DLC_LOG_FILE = os.path.join(output_dir, "dlc_filtering_log.json")
-KEYWORD_LOG_FILE = os.path.join(output_dir, "keyword_filtering_log.json")
 
 # Pre-compiled regex patterns for language support parsing
 AUDIO_FOOTNOTE_PATTERN = re.compile(r'<[^>]+>([*#^+])[^<]*audio[^<]*', re.IGNORECASE)
