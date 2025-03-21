@@ -14,6 +14,7 @@ The Steam Data Collector is a Python script designed to collect comprehensive ga
 -   Tracks usage of each key and automatically rotates keys when approaching limits
 -   Implements daily reset of usage counters
 -   Saves usage statistics for persistence between runs
+-   Applies penalties to keys that encounter rate limits
 
 #### `RateLimiter`
 
@@ -35,23 +36,30 @@ The Steam Data Collector is a Python script designed to collect comprehensive ga
 | `get_current_player_count()` | Retrieves the current number of active players                                                       |
 | `parse_language_support()`   | Analyses supported languages string to determine localisation level                                  |
 | `get_store_page_tags()`      | Enhanced function that extracts tags from store pages using multiple reliable methods                |
+| `check_app_relationship()`   | Determines if an app is a DLC or non-game content                                                    |
 
 #### Tag Management Functions
 
-| Function                       | Description                                                    |
-|--------------------------------|----------------------------------------------------------------|
-| `normalize_tag()`              | Converts tags to a standardized form for comparison            |
-| `is_semantic_duplicate()`      | Identifies semantically equivalent tags to prevent duplication |
-| `update_existing_games_tags()` | Updates existing dataset with additional tags from store pages |
+| Function                       | Description                                                         |
+|--------------------------------|---------------------------------------------------------------------|
+| `normalize_tag()`              | Converts tags to a standardized form for comparison                 |
+| `is_semantic_duplicate()`      | Identifies semantically equivalent tags to prevent duplication      |
+| `update_existing_games_tags()` | Updates existing dataset with additional tags from store pages      |
+| `convert_to_list()`            | Handles various tag formats (strings, lists, etc.) for consistency  |
+| `merge_tags()`                 | Combines user tags and genres with intelligent deduplication        |
 
 #### Utility Functions
 
-| Function               | Description                                                          |
-|------------------------|----------------------------------------------------------------------|
-| `cached_api_request()` | Makes API requests with efficient caching to prevent redundant calls |
-| `parse_steam_date()`   | Handles various date formats used by Steam                           |
-| `clean_price()`        | Normalizes price strings by removing currency symbols                |
-| `save_data_for_r()`    | Exports collected data in R-friendly formats (CSV, Feather, RDS)     |
+| Function                  | Description                                                               |
+|---------------------------|---------------------------------------------------------------------------|
+| `cached_api_request()`    | Makes API requests with efficient caching to prevent redundant calls      |
+| `parse_steam_date()`      | Handles various date formats used by Steam                                |
+| `clean_price()`           | Normalizes price strings by removing currency symbols                     |
+| `save_data_for_r()`       | Exports collected data in R-friendly formats (CSV, Feather, RDS)          |
+| `deduplicate_csv_file()`  | Removes duplicate entries from CSV files                                  |
+| `initialise_results_file()` | Sets up CSV file with proper headers for incremental writing            |
+| `append_game_to_results()`  | Adds a single game to the results with duplicate handling               |
+| `run_r_script()`          | Executes R scripts for generating RDS files with robust encoding handling |
 
 #### Process Management Functions
 
@@ -61,6 +69,7 @@ The Steam Data Collector is a Python script designed to collect comprehensive ga
 | `batch_generator()`           | Creates batches of games for memory-efficient processing                        |
 | `save_checkpoint()`           | Maintains checkpoint data to enable resuming interrupted collection             |
 | `load_checkpoint()`           | Restores state from previous checkpoints                                        |
+| `press_any_key_to_continue()` | Pauses execution until user confirmation                                        |
 
 ## Data Collection Process
 
@@ -108,7 +117,7 @@ The script now includes significant improvements to tag extraction:
 
 ## Dataset Update Feature
 
-A major new feature is the ability to update existing datasets:
+A major feature is the ability to update existing datasets:
 
 1.  **Targeted Tag Updates**:
     -   Updates games in existing datasets with newly extracted tags
@@ -122,6 +131,7 @@ A major new feature is the ability to update existing datasets:
     -   Adds only genuinely new tags to existing records
     -   Avoids semantic duplicates using sophisticated comparison
     -   Prevents genre duplication in tag lists
+    -   Generates merged game_tags that combine user tags and genres
 
 ## Filtering Mechanism
 
@@ -130,7 +140,11 @@ The script implements a three-step filtering process to identify genuine games:
 1.  **Review Threshold Filter**:
     -   Games must have at least 100 total reviews
     -   This ensures sufficient user engagement and data quality
-2.  **Required Gaming Tags Check**:
+2.  **DLC/Non-Game Identification**:
+    -   Uses `check_app_relationship()` to identify DLCs and non-game content
+    -   Examines app type, categories, and required apps
+    -   Logs filtered apps for analysis
+3.  **Required Gaming Tags Check**:
     -   Games must have at least one of the following tags:
         -   Single-player
         -   Multi-player (or Multiplayer)
@@ -138,7 +152,7 @@ The script implements a three-step filtering process to identify genuine games:
         -   Online PvP
         -   Online Co-op
     -   This helps identify actual playable games
-3.  **Exclusion Tags Check**:
+4.  **Exclusion Tags Check**:
     -   Games are excluded if they contain any of these tags:
         -   Downloadable Content
         -   Demos
@@ -149,7 +163,7 @@ The script implements a three-step filtering process to identify genuine games:
         -   Software
         -   Utilities
     -   This removes non-game content from the dataset
-4.  **Additional Filters**:
+5.  **Additional Filters**:
     -   Games must have been released from 2010 onwards
     -   Games must have valid genre information
     -   Basic game metadata must be available
@@ -158,22 +172,34 @@ The script implements a three-step filtering process to identify genuine games:
 
 ### API Request Handling
 
--   **Multi-Key Management**: Rotates between multiple API keys to maximize throughput
--   **Intelligent Caching**: Stores API responses locally to reduce redundant calls
--   **Rate Limiting**: Controls request frequency to avoid hitting API limits
--   **Error Handling**: Gracefully handles API errors, retries, and timeouts
+-   **Multi-Key Management**: 
+    -   Rotates between multiple API keys to maximize throughput
+    -   Tracks usage per key with daily automatic reset
+    -   Applies penalties to keys that hit rate limits
+-   **Intelligent Caching**: 
+    -   Stores API responses locally to reduce redundant calls
+    -   Uses SHA-256 hashing for reliable cache key generation
+    -   Organizes cache by endpoint for better management
+-   **Rate Limiting**: 
+    -   Controls request frequency to avoid hitting API limits
+    -   Implements exponential backoff for failed requests
+-   **Error Handling**: 
+    -   Gracefully handles API errors, retries, and timeouts
+    -   Provides detailed error logging for troubleshooting
 
 ### HTML Parsing
 
 -   **BeautifulSoup Integration**: Provides robust HTML parsing capabilities
 -   **Multiple Selector Strategies**: Handles variations in Steam's HTML structure
 -   **Fallback Mechanisms**: Uses multiple methods to extract data when primary methods fail
+-   **Age Verification Bypass**: Uses cookies and parameters to access age-restricted content
 
 ### Parallel Processing
 
 -   **ThreadPoolExecutor**: Processes multiple games concurrently
 -   **Dynamic Worker Adjustment**: Adjusts number of worker threads based on success rates
 -   **Rate-Limited Execution**: Ensures parallel requests don't overwhelm the API
+-   **Batch Processing**: Divides workload into manageable batches for better memory usage
 
 ### Persistence & Reliability
 
@@ -181,6 +207,14 @@ The script implements a three-step filtering process to identify genuine games:
 -   **Incremental Saving**: Writes data to CSV as soon as a game is processed
 -   **Backup Mechanisms**: Creates backup files in case of data corruption
 -   **Deduplication**: Ensures no duplicate entries in the final dataset
+-   **API Usage Tracking**: Persists API key usage statistics between runs
+
+### Language Support Analysis
+
+-   **Enhanced Language Detection**: Identifies interface/subtitle and audio support for multiple languages
+-   **Symbol Pattern Recognition**: Uses regex patterns to identify audio language markers
+-   **Language Code Mapping**: Maps between Steam's language codes and internal representation
+-   **Review Analysis by Language**: Collects and analyzes reviews in different languages
 
 ### Data Formats
 
@@ -217,7 +251,6 @@ The script outputs several files:
 -   `api_usage.json`: Tracking data for API key usage
 -   `checkpoint.pkl`: Checkpoint data for resuming interrupted runs
 -   `dlc_filtering_log.json`: Log of apps identified as DLC/non-games
--   `keyword_filtering_log.json`: Log of apps filtered by keyword patterns
 
 ## Dependencies
 
@@ -228,6 +261,13 @@ The script requires the following Python packages:
 -   `pyarrow`: For Feather file format support
 -   `concurrent.futures`: For parallel processing
 -   `beautifulsoup4`: For robust HTML parsing
+-   `re`: For regular expression pattern matching
+-   `time`, `datetime`: For time-based operations
+-   `os`, `sys`: For file system and environment operations
+-   `pickle`: For checkpoint data serialization
+-   `json`: For JSON handling
+-   `hashlib`: For cache key generation
+-   `subprocess`: For executing R scripts
 
 ## Best Practices
 
@@ -239,4 +279,7 @@ When running the script:
 4.  **Throttling**: The script self-throttles to respect API limits
 5.  **Resuming**: Use checkpoints to resume interrupted runs
 6.  **Dataset Updates**: Use the `--update-tags` option to enhance existing datasets without recollecting all data
-7.  **Don’t run this script inside your OneDrive folder**
+7.  **Single App Processing**: Use `--app-id` for testing or processing specific games
+8.  **Cache Management**: Use `--keep-cache` to preserve existing cache for repeated runs
+9.  **Deduplication**: Use `--deduplicate` to clean existing datasets
+10. **Don't run this script inside your OneDrive folder**
