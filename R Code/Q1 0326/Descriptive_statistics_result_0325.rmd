@@ -1,0 +1,2169 @@
+---
+title: "Steam Games Localisation Analysis"
+author: "Huixian Chen"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    fig_caption: true
+    code_folding: hide
+    theme: flatly
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+# Load all necessary libraries at once
+library(tidyverse)     # For data manipulation and ggplot2
+library(RColorBrewer)  # For colour palettes
+library(lubridate)     # For date handling
+library(scales)        # For better axis formatting
+library(knitr)         # For table formatting
+library(kableExtra)    # For enhanced tables
+library(ggrepel)       # For data analysis
+
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.height = 8,
+	fig.width = 10,
+	message = FALSE,
+	warning = FALSE,
+	dpi = 300,
+	out.width = "90%"
+)
+
+# Define unified color palettes for consistent visualization
+main_palette <- "Set1"        # For primary categorical variables
+alt_palette <- "Set2"         # For secondary categorical variables
+sequential_blue <- "Blues"    # For sequential data (blue shades)
+sequential_red <- "Reds"      # For alternative sequential data (red shades)
+divergent_palette <- "RdBu"   # For diverging data (positive/negative)
+
+# Create a custom theme for all ggplot visualisations
+my_theme <- theme_minimal(base_size = 14) + # Base font size for all elements
+  theme(
+    plot.title = element_text(face = "bold", size = 18), # Title
+    plot.subtitle = element_text(size = 16, color = "gray40"),   # Subtitle
+    axis.title = element_text(size = 14),                # Axis titles
+    axis.text = element_text(size = 12),                 # Axis labels
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12), # X-axis labels
+    legend.position = "right",
+    legend.title = element_text(face = "bold", size = 12),
+    panel.grid.minor = element_line(color = "gray90", linetype = "dotted"),
+    panel.grid.major = element_line(color = "gray90")
+  )
+
+# Function for consistent faceted chart theme
+facet_theme <- function() {
+  my_theme +
+    theme(
+      # Standardize facet strip appearance
+      strip.text = element_text(size = 11, face = "bold"),
+      strip.background = element_rect(fill = "lightgray", color = NA),
+      
+      # Consistent spacing
+      panel.spacing = unit(1, "cm"),
+      plot.margin = margin(1, 1, 1, 1, "cm"),
+      
+      # Remove horizontal grid lines for better readability in faceted charts
+      panel.grid.major.y = element_blank(),
+      
+      # Ensure legend position is consistent with overall document theme
+      legend.position = "right"
+    )
+}
+
+# Function for consistent table formatting with proper caption styling
+format_table <- function(df, caption = NULL, digits = 1, col.names = NULL) {
+  # Create the basic table
+  k_table <- kable(df, 
+        caption = caption,
+        digits = digits,
+        col.names = col.names)
+  
+  # Apply custom caption styling using direct HTML modification
+  # This replaces the default caption tag with one that has explicit styling
+  if (!is.null(caption)) {
+    k_table <- gsub('<caption>', 
+                   '<caption style="color: black; text-align: left; font-weight: bold; caption-side: top; white-space: nowrap;">', 
+                   k_table)
+  }
+  
+  # Continue with the rest of the styling
+  k_table %>%
+    kable_styling(
+      bootstrap_options = c("striped", "hover", "condensed"),
+      font_size = 14,
+      full_width = FALSE,
+      position = "left") %>%
+    row_spec(0, bold = TRUE)  # Bold header row
+}
+
+# Read the RDS file once
+steam_data <- readRDS("Steam_data_gametags.rds")
+
+# Extract the year from the release date if not already done
+if(!"release_year" %in% colnames(steam_data)) {
+  steam_data$release_year <- year(as.Date(steam_data$release_date))
+}
+
+# Convert price columns to numeric for analysis
+steam_data <- steam_data %>%
+  mutate(
+    price_usd_numeric = case_when(
+      price_usd == "Free" | is_free == TRUE ~ 0,
+      price_usd == "Unknown" ~ NA_real_,
+      TRUE ~ as.numeric(price_usd)
+    ),
+    price_cny_numeric = case_when(
+      price_cny == "Free" | is_free == TRUE ~ 0,
+      price_cny == "Unknown" ~ NA_real_,
+      TRUE ~ as.numeric(price_cny)
+    ),
+    # Add any other common transformations here
+    has_chinese_loc = chinese_simplified_interface_subtitles == TRUE | 
+      chinese_simplified_audio == TRUE |
+      chinese_traditional_interface_subtitles == TRUE |
+      chinese_traditional_audio == TRUE,
+    has_sc_loc = chinese_simplified_interface_subtitles == TRUE | 
+      chinese_simplified_audio == TRUE
+  )
+```
+
+# 1 Game Distribution & Publication Trends
+
+This section examines the distribution of games on Steam by year of release, 
+price ranges, and the proportion of free-to-play versus paid games over time.
+
+## 1.1 Games Published by Year
+
+The following analysis shows the number of games published on Steam per year, 
+giving an overview of platform growth and publishing trends.
+
+```{r}
+# Count games by year
+games_by_year <- steam_data %>%
+  count(release_year) %>%
+  arrange(release_year)
+
+# Convert release_year to character type
+games_by_year$release_year <- as.character(games_by_year$release_year)
+
+# Add total games row
+games_by_year_with_total <- bind_rows(
+  games_by_year,
+  data.frame(
+    release_year = "Total",
+    n = sum(games_by_year$n)
+  )
+)
+
+# Display the table of games by year with consistent formatting
+format_table(games_by_year_with_total, 
+             caption = "Number of Games Published on Steam by Year",
+             col.names = c("Year", "Number of Games"),
+             digits = c(0, 0))
+```
+
+```{r}
+# Visualise games by year (excluding the total row)
+games_by_year_for_plot <- games_by_year %>%
+  filter(release_year != "Total") %>%  # Exclude total row if present
+  mutate(release_year = as.numeric(release_year))  # Convert back to numeric for plotting
+
+ggplot(games_by_year_for_plot, aes(x = release_year, y = n)) +
+  geom_bar(stat = "identity", fill = brewer.pal(8, sequential_blue)[6]) +
+  geom_text(aes(label = n), vjust = -0.5, size = 3.5) +
+  labs(
+    title = "Number of Games Published on Steam by Year",
+    subtitle = "Showing growth in game releases over time",
+    x = "Year",
+    y = "Number of Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(games_by_year_for_plot$release_year), 
+                                 max(games_by_year_for_plot$release_year), by = 1))
+```
+
+The chart clearly shows the growth in game releases on Steam over time, with particularly significant increases occurring after 2013. 
+This coincides with Steam's expansion of its platform and the introduction of programs like Steam Greenlight and later Steam Direct, 
+which made it easier for small studio and individual developers to publish games on the platform.
+
+## 1.2 Distribution of Games by Price Range
+
+This section examines how games are distributed across different price points in both USD and CNY currencies, including free-to-play titles.
+
+```{r}
+# Find maximum prices to understand the range
+max_usd <- max(steam_data$price_usd_numeric, na.rm = TRUE)
+max_cny <- max(steam_data$price_cny_numeric, na.rm = TRUE)
+
+# Create price categories for USD with combined categories
+steam_data <- steam_data %>%
+  mutate(
+    price_usd_category = case_when(
+      is_free == TRUE ~ "Free",
+      price_usd == "Unknown" ~ "Unknown",
+      as.numeric(price_usd) < 10 ~ "< $10",
+      as.numeric(price_usd) < 20 ~ "$10 - $20",
+      as.numeric(price_usd) < 30 ~ "$20 - $30",
+      as.numeric(price_usd) < 40 ~ "$30 - $40",
+      as.numeric(price_usd) < 50 ~ "$40 - $50",
+      as.numeric(price_usd) < 60 ~ "$50 - $60",
+      TRUE ~ "$60+"  # Combined categories for $60+
+    )
+  )
+
+# Create price categories for CNY with combined categories
+steam_data <- steam_data %>%
+  mutate(
+    price_cny_category = case_when(
+      is_free == TRUE ~ "Free",
+      price_cny == "Unknown" ~ "Unknown",
+      as.numeric(price_cny) < 50 ~ "< ¥50",
+      as.numeric(price_cny) < 100 ~ "¥50 - ¥100",
+      as.numeric(price_cny) < 150 ~ "¥100 - ¥150",
+      as.numeric(price_cny) < 200 ~ "¥150 - ¥200",
+      as.numeric(price_cny) < 250 ~ "¥200 - ¥250",
+      as.numeric(price_cny) < 300 ~ "¥250 - ¥300",
+      as.numeric(price_cny) < 350 ~ "¥300 - ¥350",
+      as.numeric(price_cny) < 400 ~ "¥350 - ¥400",
+      TRUE ~ "¥400+"  # Combined categories for ¥400+
+    )
+  )
+
+# Create ordered factors for the price categories with new order
+usd_levels <- c("Unknown", "Free", "< $10", "$10 - $20", "$20 - $30", "$30 - $40", "$40 - $50", 
+                "$50 - $60", "$60+")
+cny_levels <- c("Unknown", "Free", "< ¥50", "¥50 - ¥100", "¥100 - ¥150", "¥150 - ¥200", "¥200 - ¥250", 
+                "¥250 - ¥300", "¥300 - ¥350", "¥350 - ¥400", "¥400+")
+
+# Count games by USD price category
+usd_price_distribution <- steam_data %>%
+  count(price_usd_category) %>%
+  mutate(
+    percentage = n / sum(n) * 100,  # Calculate percentage
+    price_usd_category = factor(price_usd_category, levels = usd_levels)  # Order categories
+  ) %>%
+  arrange(price_usd_category)  # Sort by the ordered factor
+
+# Count games by CNY price category
+cny_price_distribution <- steam_data %>%
+  count(price_cny_category) %>%
+  mutate(
+    percentage = n / sum(n) * 100,  # Calculate percentage
+    price_cny_category = factor(price_cny_category, levels = cny_levels)  # Order categories
+  ) %>%
+  arrange(price_cny_category)  # Sort by the ordered factor
+
+# Add total games row to USD price distribution for the table output
+usd_price_distribution_with_total <- bind_rows(
+  usd_price_distribution,
+  data.frame(
+    price_usd_category = factor("Total", levels = c(levels(usd_price_distribution$price_usd_category), "Total")),
+    n = sum(usd_price_distribution$n),
+    percentage = 100
+  )
+)
+
+# Display the USD price distribution table
+format_table(usd_price_distribution_with_total, 
+             caption = "Distribution of Steam Games by USD Price Range",
+             col.names = c("Price Range (USD)", "Number of Games", "Percentage"),
+             digits = c(0, 0, 1))
+
+# Visualize USD price distribution
+ggplot(usd_price_distribution, 
+       aes(x = price_usd_category, y = n)) +
+  geom_bar(stat = "identity", fill = brewer.pal(8, sequential_blue)[5]) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), vjust = -0.5) +
+  labs(
+    title = "Distribution of Steam Games by USD Price Range",
+    x = "Price Range (USD)",
+    y = "Number of Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme
+
+# Add total games row to CNY price distribution for the table output
+cny_price_distribution_with_total <- bind_rows(
+  cny_price_distribution,
+  data.frame(
+    price_cny_category = factor("Total", levels = c(levels(cny_price_distribution$price_cny_category), "Total")),
+    n = sum(cny_price_distribution$n),
+    percentage = 100
+  )
+)
+
+# Display the CNY price distribution table
+format_table(cny_price_distribution_with_total, 
+             caption = "Distribution of Steam Games by CNY Price Range",
+             col.names = c("Price Range (CNY)", "Number of Games", "Percentage"),
+             digits = c(0, 0, 1))
+
+# Visualize CNY price distribution
+ggplot(cny_price_distribution, 
+       aes(x = price_cny_category, y = n)) +
+  geom_bar(stat = "identity", fill = brewer.pal(8, sequential_red)[5]) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), vjust = -0.5) +
+  labs(
+    title = "Distribution of Steam Games by CNY Price Range",
+    subtitle = "Showing price distribution across different price bands",
+    x = "Price Range (CNY)",
+    y = "Number of Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme
+```
+
+The price distribution analysis reveals that a significant portion of games on Steam are priced below $10 USD or ¥50 CNY, 
+suggesting a market dominated by affordable titles. This is likely influenced by the prevalence of indie games and the competitive nature of the digital marketplace.
+
+As for games with unknown price in our dataset, especially for CNY, there are varies reasons:
+1. Delisted/removed games - Games that have been removed from the store but still exist in the database.
+2. Region restrictions - Games unavailable in certain regions won't return pricing for those regions.
+3. Subscription-only games - Titles available only through services like EA Play.(not likely in this case)
+4. Discontinued products - Games no longer supported may have pricing information removed.
+
+## 1.3 Free-to-Play vs. Paid Games Over Time
+
+This analysis examines the proportion of free-to-play versus paid games over time, showing how monetisation strategies have evolved on the platform.
+
+```{r}
+# Calculate corrected game type counts
+free_paid_summary <- steam_data %>%
+  summarise(
+    Free = sum(is_free == TRUE, na.rm = TRUE),
+    Paid = sum(is_free == FALSE & (price_usd != "Unknown" | price_cny != "Unknown"), na.rm = TRUE),
+    Unknown = sum(is_free == FALSE & price_usd == "Unknown" & price_cny == "Unknown", na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = everything(), names_to = "Category", values_to = "Count") %>%
+  mutate(
+    Percentage = Count / sum(Count) * 100,
+    Label = paste0(round(Percentage, 1), "%")  # Simplified label for the chart
+  )
+
+# Display the summary table
+format_table(free_paid_summary, 
+             caption = "Distribution of Free vs. Paid Games on Steam",
+             col.names = c("Category", "Count", "Percentage", "Label"),
+             digits = c(0, 0, 1, 0))
+
+# Bar chart for visualisation
+ggplot(free_paid_summary, aes(x = reorder(Category, -Count), y = Count, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(Count, " (", round(Percentage, 1), "%)")), 
+            vjust = -0.5, color = "black") +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Distribution of Free vs. Paid Games on Steam",
+    x = "Category",
+    y = "Number of Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Time series analysis with corrected categories
+free_paid_by_year <- steam_data %>%
+  filter(!is.na(release_year)) %>%
+  group_by(release_year) %>%
+  summarise(
+    Total = n(),
+    Free = sum(is_free == TRUE, na.rm = TRUE),
+    Paid = sum(is_free == FALSE & (price_usd != "Unknown" | price_cny != "Unknown"), na.rm = TRUE),
+    Unknown = sum(is_free == FALSE & price_usd == "Unknown" & price_cny == "Unknown", na.rm = TRUE)
+  ) %>%
+  mutate(
+    Free_Percentage = Free / Total * 100,
+    Paid_Percentage = Paid / Total * 100,
+    Unknown_Percentage = Unknown / Total * 100
+  )
+
+# Display the free vs. paid games by year table
+format_table(free_paid_by_year, 
+             caption = "Free vs. Paid Games on Steam by Year",
+             col.names = c("Year", "Total Games", "Free Games", "Paid Games", "Unknown Price", 
+                           "Free %", "Paid %", "Unknown %"),
+             digits = c(0, 0, 0, 0, 0, 1, 1, 1))
+
+# Convert to long format for ggplot
+free_paid_long <- free_paid_by_year %>%
+  select(release_year, Free_Percentage, Paid_Percentage, Unknown_Percentage) %>%
+  pivot_longer(
+    cols = c(Free_Percentage, Paid_Percentage, Unknown_Percentage),
+    names_to = "Type",
+    values_to = "Percentage"
+  ) %>%
+  mutate(Type = str_remove(Type, "_Percentage"))
+```
+
+```{r}
+# Visualise proportion of free vs paid games over time (stacked bar chart)
+ggplot(free_paid_long, aes(x = release_year, y = Percentage, fill = Type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Proportion of Free, Paid and Unknown-Price Games Over Time",
+    subtitle = "Showing the evolution of game pricing models by year",
+    x = "Year",
+    y = "Percentage of Games",
+    fill = "Game Type",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(free_paid_by_year$release_year), 
+                                 max(free_paid_by_year$release_year), by = 1)) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"))
+```
+
+```{r}
+# Visualise proportion of free vs paid games over time (line chart)
+ggplot(free_paid_by_year, aes(x = release_year)) +
+  geom_line(aes(y = Free_Percentage, colour = "Free"), linewidth = 1) +
+  geom_line(aes(y = Paid_Percentage, colour = "Paid"), linewidth = 1) +
+  geom_line(aes(y = Unknown_Percentage, colour = "Unknown"), linewidth = 1, linetype = "dashed") +
+  geom_point(aes(y = Free_Percentage, colour = "Free"), size = 3) +
+  geom_point(aes(y = Paid_Percentage, colour = "Paid"), size = 3) +
+  geom_point(aes(y = Unknown_Percentage, colour = "Unknown"), size = 3) +
+  scale_colour_brewer(palette = alt_palette, name = "Game Type") +
+  labs(
+    title = "Trend of Free-to-Play vs. Paid Games on Steam Over Time",
+    subtitle = "Showing changes in the proportion of each pricing model by year",
+    x = "Year",
+    y = "Percentage of Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(free_paid_by_year$release_year), 
+                                 max(free_paid_by_year$release_year), by = 1)) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"))
+```
+
+Analysis of free-to-play versus paid games reveals that while paid games still hold an absolute dominance on the Steam platform, 
+free-to-play games have also maintained a significant presence over the years, accounting for 2.4% of the total. The bar chart reveals 
+interesting trends in how these business models have evolved over time, potentially reflecting broader industry shifts in monetisation strategies. 
+Examining the data by year, we can observe that the proportion of free-to-play games peaked in 2011 and subsequently decreased slowly year by year. 
+This may correspond to a period of market experimentation with different revenue models, including the rise of in-app purchases and cosmetic 
+microtransactions as alternative monetisation methods for free-to-play games.
+
+# 2. Localisation Patterns
+
+This section examines the prevalence and patterns of language support in Steam games, with particular focus on Simplified Chinese (SC) and Traditional Chinese (TC) localisation compared to English support. The analysis explores both overall trends and year-by-year adoption rates.
+
+## 2.1 Language Support Overview
+
+This analysis compares the number and percentage of games with any form of language support across English, Simplified Chinese, and Traditional Chinese.
+
+```{r language-support-overview}
+# Create flags for any level of localisation support
+loc_summary <- steam_data %>%
+  summarise(
+    Total_Games = n(),
+    SC_Any = sum(chinese_simplified_interface_subtitles == TRUE | 
+                   chinese_simplified_audio == TRUE, na.rm = TRUE),
+    TC_Any = sum(chinese_traditional_interface_subtitles == TRUE | 
+                   chinese_traditional_audio == TRUE, na.rm = TRUE),
+    English_Any = sum(english_interface_subtitles == TRUE | 
+                        english_audio == TRUE, na.rm = TRUE)
+  ) %>%
+  mutate(
+    SC_Percentage = SC_Any / Total_Games * 100,
+    TC_Percentage = TC_Any / Total_Games * 100,
+    English_Percentage = English_Any / Total_Games * 100
+  )
+
+# Display the summary
+format_table(loc_summary, 
+             caption = "Games with Language Support by Type",
+             col.names = c("Total Games", "SC Support", "TC Support", "English Support", 
+                           "SC %", "TC %", "English %"),
+             digits = c(0, 0, 0, 0, 1, 1, 1))
+
+# Convert to long format for visualization
+loc_summary_long <- loc_summary %>%
+  select(SC_Any, TC_Any, English_Any) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "Language",
+    values_to = "Count"
+  ) %>%
+  mutate(
+    Language = case_when(
+      Language == "SC_Any" ~ "Simplified Chinese",
+      Language == "TC_Any" ~ "Traditional Chinese",
+      Language == "English_Any" ~ "English"
+    ),
+    Percentage = case_when(
+      Language == "Simplified Chinese" ~ loc_summary$SC_Percentage,
+      Language == "Traditional Chinese" ~ loc_summary$TC_Percentage,
+      Language == "English" ~ loc_summary$English_Percentage
+    )
+  )
+
+# Visualise localisation support comparison
+ggplot(loc_summary_long, aes(x = reorder(Language, -Count), y = Count, fill = Language)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(Count, " (", round(Percentage, 1), "%)")), 
+            vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Games with Language Support by Type",
+    subtitle = "Comparison of English, Simplified Chinese, and Traditional Chinese",
+    x = "Language",
+    y = "Number of Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(legend.position = "none")
+```
+
+The comparison reveals that while English remains the dominant language for game localisation on Steam, 
+Chinese language support has gained significant traction. Notably, Simplified Chinese support is available 
+in a greater number of games than Traditional Chinese, as SC localisation are available on nearly 50% of 
+games on Steam reflecting the market importance of mainland China compared to other Chinese-speaking regions.
+
+## 2.2 Detailed Localisation Breakdown
+
+This section provides a more detailed examination of language support levels, distinguishing between interface/subtitle support and full audio dubbing.
+
+```{r localisation-breakdown}
+# Create a table with languages as rows and support levels as columns
+support_breakdown <- data.frame(
+  Language = c("English", "Simplified Chinese", "Traditional Chinese"),
+  
+  # 1. No support at all
+  No_Support_Count = c(
+    sum(steam_data$english_interface_subtitles == FALSE & steam_data$english_audio == FALSE, na.rm = TRUE),
+    sum(steam_data$chinese_simplified_interface_subtitles == FALSE & steam_data$chinese_simplified_audio == FALSE, na.rm = TRUE),
+    sum(steam_data$chinese_traditional_interface_subtitles == FALSE & steam_data$chinese_traditional_audio == FALSE, na.rm = TRUE)
+  ),
+  
+  # 2. Has interface/subtitles (regardless of audio)
+  Has_Interface_Count = c(
+    sum(steam_data$english_interface_subtitles == TRUE, na.rm = TRUE),
+    sum(steam_data$chinese_simplified_interface_subtitles == TRUE, na.rm = TRUE),
+    sum(steam_data$chinese_traditional_interface_subtitles == TRUE, na.rm = TRUE)
+  ),
+  
+  # 3. Among those with interface/subtitles, how many also have dubbing
+  Has_Dubbing_Count = c(
+    sum(steam_data$english_audio == TRUE, na.rm = TRUE),
+    sum(steam_data$chinese_simplified_audio == TRUE, na.rm = TRUE),
+    sum(steam_data$chinese_traditional_audio == TRUE, na.rm = TRUE)
+  )
+)
+
+# Calculate percentages based on total games
+total_games <- nrow(steam_data)
+support_breakdown <- support_breakdown %>%
+  mutate(
+    No_Support_Pct = No_Support_Count / total_games * 100,
+    Has_Interface_Pct = Has_Interface_Count / total_games * 100,
+    Has_Dubbing_Pct = Has_Dubbing_Count / total_games * 100
+  )
+
+# Display the table
+format_table(support_breakdown, 
+      caption = "Language Support Breakdown",
+      col.names = c("Language", "No Support Count", "Interface/Subtitles Count", "Audio Dubbing Count",
+                    "No Support %", "Interface/Subtitles %", "Audio Dubbing %"),
+      digits = c(0, 0, 0, 0, 1, 1, 1))
+
+# Create a cleaner version for visualization purposes
+support_pct <- support_breakdown %>%
+  select(Language, No_Support_Pct, Has_Interface_Pct, Has_Dubbing_Pct)
+
+# Create a visualization for these percentages
+support_pct_long <- support_pct %>%
+  pivot_longer(
+    cols = c(No_Support_Pct, Has_Interface_Pct, Has_Dubbing_Pct),
+    names_to = "Support_Type",
+    values_to = "Percentage"
+  ) %>%
+  mutate(Support_Type = factor(
+    case_when(
+      Support_Type == "No_Support_Pct" ~ "1. No Language Support",
+      Support_Type == "Has_Interface_Pct" ~ "2. Has Interface/Subtitles",
+      Support_Type == "Has_Dubbing_Pct" ~ "3. Has Dubbing Support"
+    ),
+    levels = c("1. No Language Support", "2. Has Interface/Subtitles", "3. Has Dubbing Support")
+  ))
+
+# Create grouped bar chart
+ggplot(support_pct_long, aes(x = Language, y = Percentage, fill = Support_Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = sequential_blue) +
+  labs(
+    title = "Language Support Breakdown by Type",
+    subtitle = "Categories are not mutually exclusive",
+    x = "Language",
+    y = "Percentage of Games",
+    fill = "Support Level",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_y_continuous(limits = c(0, 100))
+```
+
+```{r}
+# Create a heatmap version to show the percentage differences more clearly
+ggplot(support_pct_long, aes(x = Support_Type, y = Language, fill = Percentage)) +
+  geom_tile() +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), color = "white", fontface = "bold") +
+  scale_fill_gradient(low = "steelblue", high = "darkblue") +
+  labs(
+    title = "Language Support Breakdown Heatmap",
+    subtitle = "Percentage of games with different levels of language support",
+    x = "Support Level",
+    y = "Language",
+    fill = "Percentage",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+A detailed analysis reveals significant disparities in the depth of language support across different languages. 
+While English interface support is nearly universal, Simplified Chinese interface support is available in a considerable 
+proportion of games, at approximately 50%. However, full audio dubbing is less common across all languages. Games offering 
+English dubbing constitute 47.4% of the total, compares to 96.9% of games has English interface support; While Simplified 
+Chinese dubbing is available in less than a quarter of that, at only 11.3%, indicating that the majority of Chinese localisation 
+at this current stage still focuses on text rather than voice dubbing. This may reflect the higher costs associated with 
+audio dubbing compared to text translation.
+
+## 2.3 Chinese Localisation Trends by Year
+
+This analysis examines how Chinese localisation adoption has evolved over time, tracking both absolute numbers and percentages.
+
+```{r chinese-localisation-trends}
+# Create combined Chinese support categories
+steam_data <- steam_data %>%
+  mutate(
+    chinese_support_category = case_when(
+      (chinese_simplified_interface_subtitles == TRUE | chinese_simplified_audio == TRUE) &
+        (chinese_traditional_interface_subtitles == TRUE | chinese_traditional_audio == TRUE) ~ "Both SC and TC",
+      (chinese_simplified_interface_subtitles == TRUE | chinese_simplified_audio == TRUE) ~ "SC Only",
+      (chinese_traditional_interface_subtitles == TRUE | chinese_traditional_audio == TRUE) ~ "TC Only",
+      TRUE ~ "No Chinese Support"
+    )
+  )
+
+# Count games by Chinese support category and year
+chinese_support_by_year <- steam_data %>%
+  filter(!is.na(release_year)) %>%
+  group_by(release_year) %>%
+  summarise(
+    Total = n(),
+    SC_Only = sum(chinese_support_category == "SC Only", na.rm = TRUE),
+    TC_Only = sum(chinese_support_category == "TC Only", na.rm = TRUE),
+    Both = sum(chinese_support_category == "Both SC and TC", na.rm = TRUE)
+  ) %>%
+  mutate(
+    Any_Chinese = SC_Only + TC_Only + Both,
+    SC_Only_Ratio = SC_Only / Total * 100,
+    TC_Only_Ratio = TC_Only / Total * 100,
+    Both_Ratio = Both / Total * 100,
+    Any_Chinese_Ratio = Any_Chinese / Total * 100
+  )
+
+# Display the summary by year
+format_table(chinese_support_by_year, 
+             caption = "Chinese Support by Year",
+             col.names = c("Year", "Total Games", "SC Only", "TC Only", "Both SC & TC", 
+                          "Any Chinese", "SC Only %", "TC Only %", "Both %", "Any Chinese %"),
+             digits = c(0, 0, 0, 0, 0, 0, 1, 1, 1, 1))
+```
+
+```{r}
+# Visualize absolute numbers by year
+chinese_support_long <- chinese_support_by_year %>%
+  select(release_year, SC_Only, TC_Only, Both) %>%
+  pivot_longer(
+    cols = c(SC_Only, TC_Only, Both),
+    names_to = "Support_Type",
+    values_to = "Count"
+  ) %>%
+  mutate(Support_Type = factor(Support_Type, 
+                               levels = c("Both", "SC_Only", "TC_Only"),
+                               labels = c("Both SC and TC", "SC Only", "TC Only")))
+
+# Stacked bar chart of absolute numbers
+ggplot(chinese_support_long, aes(x = release_year, y = Count, fill = Support_Type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Chinese Localisation Adoption Trends by Year",
+    subtitle = "Number of Games with Chinese Support",
+    x = "Year",
+    y = "Number of Games",
+    fill = "Support Type",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(chinese_support_by_year$release_year), 
+                                  max(chinese_support_by_year$release_year), by = 1))
+```
+
+```{r}
+# Line chart showing the ratio trends
+ratio_long <- chinese_support_by_year %>%
+  select(release_year, SC_Only_Ratio, TC_Only_Ratio, Both_Ratio, Any_Chinese_Ratio) %>%
+  pivot_longer(
+    cols = c(SC_Only_Ratio, TC_Only_Ratio, Both_Ratio, Any_Chinese_Ratio),
+    names_to = "Type",
+    values_to = "Ratio"
+  ) %>%
+  mutate(Type = factor(Type, 
+                       levels = c("Any_Chinese_Ratio", "Both_Ratio", "SC_Only_Ratio", "TC_Only_Ratio"),
+                       labels = c("Any Chinese", "Both SC and TC", "SC Only", "TC Only")))
+
+# Line chart of ratio trends
+ggplot(ratio_long, aes(x = release_year, y = Ratio, color = Type, group = Type)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_color_brewer(palette = main_palette) +
+  labs(
+    title = "Chinese Localisation Adoption Ratio Trends",
+    subtitle = "Percentage of Games with Chinese Support by Year",
+    x = "Year",
+    y = "Percentage of Games",
+    color = "Support Type",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(chinese_support_by_year$release_year), 
+                                  max(chinese_support_by_year$release_year), by = 1)) +
+  scale_y_continuous(labels = function(x) paste0(round(x, 1), "%"))
+```
+
+A long-term analysis of localisation trends in China reveals that the proportion of games offering Chinese 
+language support has been increasing since 2010, with a particularly significant rise after 2015. This coincides 
+with the official support CNY currency on Steam Store in Mainland China and the growing recognition of the Chinese 
+game market's importance. The data indicates that not only has the absolute number of games with Chinese language support grown, 
+but the percentage of games offering this support has also steadily increased, suggesting a shift in focus 
+towards localisation across the market.
+
+Furthermore, it can be observed that from 2019 onwards, the proportion of games offering only Traditional 
+Chinese localisation has been decreasing year by year, with an increasing number of developers choosing to 
+offer both Simplified and Traditional Chinese localisation. The proportion of games offering only Simplified 
+Chinese localisation, for various reasons, has also remained stable at a level around 30%, showing a upward 
+trend in recent years.
+
+## 2.4 Ratio of Chinese Localised Games Over Time
+
+This section focuses specifically on the ratio of games with any Chinese support compared to total releases, highlighting the overall trend in adoption.
+
+```{r chinese-localisation-ratio}
+# Create a focused visualization of Chinese localisation ratio by year
+ggplot(chinese_support_by_year, aes(x = release_year, y = Any_Chinese_Ratio)) +
+  geom_bar(stat = "identity", fill = brewer.pal(9, sequential_blue)[6]) +
+  geom_text(aes(label = paste0(round(Any_Chinese_Ratio, 1), "%")), 
+            vjust = -0.5, size = 3.5) +
+  labs(
+    title = "Ratio of Chinese Localised Games to Total Games by Year",
+    subtitle = "Percentage of Steam Games with Any Chinese Support (SC or TC)",
+    x = "Release Year",
+    y = "Percentage of Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(chinese_support_by_year$release_year), 
+                                  max(chinese_support_by_year$release_year), by = 1)) +
+  scale_y_continuous(limits = c(0, max(chinese_support_by_year$Any_Chinese_Ratio) * 1.1),
+                     labels = function(x) paste0(round(x, 1), "%"))
+```
+
+```{r}
+# Also create a dual-axis chart to compare total games and localised games trends
+ggplot(chinese_support_by_year) +
+  geom_col(aes(x = release_year, y = Total), fill = "lightgrey", alpha = 0.7) +
+  geom_line(aes(x = release_year, y = Any_Chinese * 5), 
+            color = brewer.pal(9, sequential_red)[7], size = 1.5, group = 1) +
+  geom_point(aes(x = release_year, y = Any_Chinese * 5), 
+             color = brewer.pal(9, sequential_red)[7], size = 3) +
+  scale_y_continuous(
+    name = "Total Games Released",
+    sec.axis = sec_axis(~./5, name = "Games with Chinese Localisation")
+  ) +
+  labs(
+    title = "Volume of Chinese Localised Games vs Total Releases by Year",
+    subtitle = "Comparing growth trends of games with Chinese support against overall releases",
+    x = "Release Year",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(
+    axis.title.y.left = element_text(color = "grey30"),
+    axis.title.y.right = element_text(color = brewer.pal(9, sequential_red)[7])
+  ) +
+  scale_x_continuous(breaks = seq(min(chinese_support_by_year$release_year), 
+                                  max(chinese_support_by_year$release_year), by = 1)) +
+  geom_text(aes(x = release_year, y = Any_Chinese * 5, 
+                label = Any_Chinese), 
+            vjust = -1, color = brewer.pal(9, sequential_red)[7], size = 3.5)
+```
+
+```{r}
+# Create a table showing the raw numbers and percentages by year
+localisation_summary_table <- chinese_support_by_year %>%
+  select(release_year, Total, Any_Chinese, Any_Chinese_Ratio) %>%
+  arrange(desc(release_year))
+
+# Display the table
+format_table(localisation_summary_table, 
+      col.names = c("Year", "Total Games", "Games with Chinese", "% with Chinese"),
+      caption = "Chinese Localisation Adoption by Year",
+      digits = c(0, 0, 0, 1))
+```
+
+The bar chart clearly shows a significant increase in the adoption rate of Chinese localisation over time, 
+rising from less than 10% in the early 2010s to over 70% in recent years. The dual-axis graph provides additional 
+context by comparing the number of games supporting Chinese each year with the total number of games released 
+annually, indicating that Chinese localisation has not only grown in absolute numbers but also as a proportion of 
+all games released. This trend highlights the growing recognition of the importance of the Chinese market among game 
+developers and publishers.
+
+## 2.5 Localisation by Game Type: Indie vs. Non-Indie
+
+This section compares localisation patterns between indie and non-indie games, revealing differences in localisation strategies across different segments of the industry.
+
+```{r indie-localisation}
+# Create a function to check if "Indie" is in the game_tags string
+has_indie_tag <- function(tags_str) {
+  # Check if the string contains 'Indie' as a distinct tag
+  return(grepl("'Indie'", tags_str, fixed = TRUE))
+}
+
+# Apply this function to determine if a game is indie
+steam_data <- steam_data %>%
+  mutate(
+    has_indie_tag = has_indie_tag(game_tags),
+    any_chinese = chinese_simplified_interface_subtitles == TRUE | 
+      chinese_simplified_audio == TRUE | 
+      chinese_traditional_interface_subtitles == TRUE | 
+      chinese_traditional_audio == TRUE
+  )
+
+# Get statistics on how many games have or don't have the indie tag
+indie_stats <- steam_data %>%
+  group_by(has_indie_tag) %>%
+  summarise(
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    percentage = count / sum(count) * 100,
+    game_type = ifelse(has_indie_tag, "Indie Games", "Non-Indie Games")
+  )
+
+# Display the indie vs non-indie statistics
+format_table(indie_stats %>% select(game_type, count, percentage), 
+             caption = "Distribution of Indie vs. Non-Indie Games",
+             col.names = c("Game Type", "Count", "Percentage (%)"),
+             digits = c(0, 0, 1))
+```
+
+```{r}
+# Compare Chinese localisation between indie and non-indie games
+indie_localisation <- steam_data %>%
+  group_by(has_indie_tag) %>%
+  summarise(
+    Total = n(),
+    With_Chinese = sum(any_chinese, na.rm = TRUE),
+    SC_Interface = sum(chinese_simplified_interface_subtitles == TRUE, na.rm = TRUE),
+    SC_Audio = sum(chinese_simplified_audio == TRUE, na.rm = TRUE),
+    TC_Interface = sum(chinese_traditional_interface_subtitles == TRUE, na.rm = TRUE),
+    TC_Audio = sum(chinese_traditional_audio == TRUE, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Chinese_Ratio = With_Chinese / Total * 100,
+    SC_Interface_Ratio = SC_Interface / Total * 100,
+    SC_Audio_Ratio = SC_Audio / Total * 100,
+    TC_Interface_Ratio = TC_Interface / Total * 100,
+    TC_Audio_Ratio = TC_Audio / Total * 100,
+    Game_Type = ifelse(has_indie_tag, "Indie Games", "Non-Indie Games")
+  )
+
+# Display the indie vs. non-indie comparison
+format_table(indie_localisation %>% select(-has_indie_tag), 
+             caption = "Chinese Localisation by Game Type",
+             col.names = c("Game Type", "Total Games", "With Chinese", "SC Interface", "SC Audio",
+                          "TC Interface", "TC Audio", "Chinese %", "SC Interface %", "SC Audio %",
+                          "TC Interface %", "TC Audio %"),
+             digits = c(0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1))
+```
+
+```{r}
+# Create a grouped bar chart for the comparison
+indie_loc_long <- indie_localisation %>%
+  select(Game_Type, Chinese_Ratio, SC_Interface_Ratio, SC_Audio_Ratio, 
+         TC_Interface_Ratio, TC_Audio_Ratio) %>%
+  pivot_longer(
+    cols = -Game_Type,
+    names_to = "Localisation_Type",
+    values_to = "Percentage"
+  ) %>%
+  mutate(
+    Game_Type = factor(Game_Type, levels = c("Indie Games", "Non-Indie Games")),
+    Localisation_Type = case_when(
+      Localisation_Type == "Chinese_Ratio" ~ "Any Chinese",
+      Localisation_Type == "SC_Interface_Ratio" ~ "SC Interface/Subtitles",
+      Localisation_Type == "SC_Audio_Ratio" ~ "SC Audio",
+      Localisation_Type == "TC_Interface_Ratio" ~ "TC Interface/Subtitles",
+      Localisation_Type == "TC_Audio_Ratio" ~ "TC Audio"
+    ),
+    Localisation_Type = factor(Localisation_Type, 
+                             levels = c("Any Chinese", 
+                                       "SC Interface/Subtitles", 
+                                       "SC Audio", 
+                                       "TC Interface/Subtitles", 
+                                       "TC Audio"))
+  )
+
+# Grouped bar chart comparing indie vs. non-indie localisation
+ggplot(indie_loc_long, aes(x = Localisation_Type, y = Percentage, fill = Game_Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Chinese Localisation by Game Type",
+    subtitle = "Comparison between Indie and Non-Indie Games",
+    x = "Localisation Type",
+    y = "Percentage of Games",
+    fill = "Game Type",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = function(x) paste0(round(x, 1), "%"))
+```
+
+```{r}
+
+# Additional analysis: Localisation trends for indie vs. non-indie games over time
+indie_by_year <- steam_data %>%
+  filter(!is.na(release_year)) %>%
+  group_by(release_year, has_indie_tag) %>%  # Changed from has_indie_genre to has_indie_tag
+  summarise(
+    Total = n(),
+    With_Chinese = sum(any_chinese, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Chinese_Ratio = With_Chinese / Total * 100,
+    Game_Type = ifelse(has_indie_tag, "Indie Games", "Non-Indie Games")  # Changed from has_indie_genre to has_indie_tag
+  )
+
+# Filter to include only years with sufficient data for both types
+year_type_counts <- indie_by_year %>%
+  group_by(release_year, Game_Type) %>%
+  summarise(count = first(Total), .groups = "drop")
+
+valid_years <- year_type_counts %>%
+  group_by(release_year) %>%
+  filter(n() == 2) %>%
+  filter(all(count >= 10)) %>%
+  pull(release_year) %>%
+  unique()
+
+indie_by_year_filtered <- indie_by_year %>%
+  filter(release_year %in% valid_years)
+
+# Line chart showing localisation trends for indie vs. non-indie over time
+ggplot(indie_by_year_filtered, aes(x = release_year, y = Chinese_Ratio, 
+                                   color = Game_Type, group = Game_Type)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_color_brewer(palette = main_palette) +
+  labs(
+    title = "Chinese Localisation Trends: Indie vs. Non-Indie Games",
+    subtitle = "Percentage of Games with Chinese Support by Year",
+    x = "Year",
+    y = "Percentage of Games with Chinese Support",
+    color = "Game Type",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(indie_by_year_filtered$release_year), 
+                                  max(indie_by_year_filtered$release_year), by = 1)) +
+  scale_y_continuous(labels = function(x) paste0(round(x, 1), "%"))
+```
+
+A comparison of indie and non-indie games reveals significant differences in Chinese localisation proportion, 
+particularly in terms of dubbing. This likely reflects the resource constraints faced by independent developers 
+and small studios, who may have more limited localisation budgets compared to larger studios, and tend to conserve 
+resources by only translating the SC interface. I must admit that this data exceeded my expectations: the 
+proportion of indie games (51.3%) and non-indie games (53.5%) undergoing any form of Chinese localisation is similar; 
+the proportion of SC interface localisation in indie games is even slightly higher than that of non-indie games (50.0% vs. 47.9%); 
+overall, a higher percentage of games provide SC interface localisation, and the localisation rate of TC interfaces 
+in non-indie games is significantly higher than that in indie games (35.6% vs. 25.3%); dubbing is generally much less 
+common than text localisation, and the localisation rate of TC dubbing in non-indie games is slightly higher than that of 
+SC (12.7% vs. 11.2%), while the proportion of indie and non-indie games providing SC localised dubbing is very similar.
+
+It is worth noting that the scale and presentation of "dubbing" localisation vary for each game, so it is necessary 
+to explore this data in more depth, maybe in the future research.
+
+# 3. Review Metrics & Comparisons
+
+This section examines review patterns across different languages on Steam, focusing on the distribution, volume, and sentiment of reviews in Simplified Chinese (SC) compared to English and other languages. These analyses help understand engagement patterns and preferences across different language communities.
+
+## 3.1 Review Distribution by Language
+
+This analysis looks at the proportion of total reviews in Simplified Chinese versus English and other languages over time, revealing trends in the language distribution of Steam user reviews.
+
+```{r review-distribution}
+# Create a summary of review counts by language and year
+review_dist_by_year <- steam_data %>%
+  filter(!is.na(release_year)) %>%
+  group_by(release_year) %>%
+  summarise(
+    Total_Reviews = sum(total_reviews, na.rm = TRUE),
+    SC_Reviews = sum(schinese_reviews, na.rm = TRUE),
+    English_Reviews = sum(english_reviews, na.rm = TRUE),
+    Other_Reviews = sum(other_reviews, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    SC_Proportion = SC_Reviews / Total_Reviews * 100,
+    English_Proportion = English_Reviews / Total_Reviews * 100,
+    Other_Proportion = Other_Reviews / Total_Reviews * 100
+  )
+
+# Display the summary table
+format_table(review_dist_by_year, 
+             caption = "Distribution of Reviews by Language and Year",
+             col.names = c("Year", "Total Reviews", "SC Reviews", "English Reviews", "Other Reviews", 
+                           "SC %", "English %", "Other %"),
+             digits = c(0, 0, 0, 0, 0, 1, 1, 1))
+```
+
+```{r}
+# Convert to long format for visualisation
+review_dist_long <- review_dist_by_year %>%
+  select(release_year, SC_Proportion, English_Proportion, Other_Proportion) %>%
+  pivot_longer(
+    cols = c(SC_Proportion, English_Proportion, Other_Proportion),
+    names_to = "Language",
+    values_to = "Proportion"
+  ) %>%
+  mutate(Language = case_when(
+    Language == "SC_Proportion" ~ "Simplified Chinese",
+    Language == "English_Proportion" ~ "English",
+    Language == "Other_Proportion" ~ "Other Languages"
+  ))
+
+# Create a stacked area chart to show proportions over time
+ggplot(review_dist_long, aes(x = release_year, y = Proportion, fill = Language)) +
+  geom_area(position = "stack") +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Proportion of Reviews by Language Over Time",
+    subtitle = "Distribution of Steam reviews across language groups",
+    x = "Year",
+    y = "Percentage of Total Reviews",
+    fill = "Language",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(review_dist_by_year$release_year), 
+                                  max(review_dist_by_year$release_year), by = 1)) +
+  scale_y_continuous(labels = function(x) paste0(round(x, 1), "%"))
+```
+
+```{r}
+# Create a line chart to show the trend more clearly
+ggplot(review_dist_long, aes(x = release_year, y = Proportion, color = Language, group = Language)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_color_brewer(palette = main_palette) +
+  labs(
+    title = "Proportion of Reviews by Language Over Time",
+    subtitle = "Trends in language distribution of Steam reviews",
+    x = "Year",
+    y = "Percentage of Total Reviews",
+    color = "Language",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(review_dist_by_year$release_year), 
+                                  max(review_dist_by_year$release_year), by = 1)) +
+  scale_y_continuous(labels = function(x) paste0(round(x, 1), "%"))
+```
+
+Analysis reveals significant trends in the language distribution of Steam reviews over time. English reviews have long dominated, 
+fluctuating between 40% and 50% of the total number of reviews. The proportion of Simplified Chinese reviews increased significantly 
+after 2014, with a peak in 2017, before stabilising at around 20%. This shift coincides with Steam's growing popularity in China and 
+the platform's expansion into the Chinese market (able to pay in CNY). In recent years, Simplified Chinese reviews have constituted a 
+considerable proportion of all reviews, highlighting the increasing importance of the Chinese gaming community on Steam.
+
+It is also worth discussing whether all Chinese users comment in their native language, what proportion of players who purchased a 
+game leave a review, and whether this proportion varies by language. What is causing the big spike on 2012 for other language review number
+is interesting.
+
+## 3.2 Review Volume Comparison by Language
+
+This section compares the average number of reviews per game across different languages over time, providing insight into the engagement levels of various language communities.
+
+```{r review-volume}
+# Calculate average reviews per game by language and year
+review_volume_by_year <- steam_data %>%
+  filter(!is.na(release_year)) %>%
+  group_by(release_year) %>%
+  summarise(
+    Total_Games = n(),
+    Avg_Total_Reviews = mean(total_reviews, na.rm = TRUE),
+    Avg_SC_Reviews = mean(schinese_reviews, na.rm = TRUE),
+    Avg_English_Reviews = mean(english_reviews, na.rm = TRUE),
+    Avg_Other_Reviews = mean(other_reviews, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Display the summary table
+format_table(review_volume_by_year, 
+             caption = "Average Review Volume per Game by Language and Year",
+             col.names = c("Year", "Total Games", "Avg Total Reviews", "Avg SC Reviews", 
+                           "Avg English Reviews", "Avg Other Reviews"),
+             digits = c(0, 0, 1, 1, 1, 1))
+```
+
+```{r}
+# Convert to long format for visualisation
+review_volume_long <- review_volume_by_year %>%
+  select(release_year, Avg_SC_Reviews, Avg_English_Reviews, Avg_Other_Reviews) %>%
+  pivot_longer(
+    cols = c(Avg_SC_Reviews, Avg_English_Reviews, Avg_Other_Reviews),
+    names_to = "Language",
+    values_to = "Average_Reviews"
+  ) %>%
+  mutate(Language = case_when(
+    Language == "Avg_SC_Reviews" ~ "Simplified Chinese",
+    Language == "Avg_English_Reviews" ~ "English",
+    Language == "Avg_Other_Reviews" ~ "Other Languages"
+  ))
+
+# Create a grouped bar chart for average review volume by language and year
+ggplot(review_volume_long, aes(x = release_year, y = Average_Reviews, fill = Language)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Average Review Volume per Game by Language",
+    subtitle = "Comparing review engagement across language groups",
+    x = "Year",
+    y = "Average Reviews per Game",
+    fill = "Language",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(review_volume_by_year$release_year), 
+                                  max(review_volume_by_year$release_year), by = 1))
+```
+
+```{r}
+# Also create a line chart to show the trend more clearly
+ggplot(review_volume_long, aes(x = release_year, y = Average_Reviews, color = Language, group = Language)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_color_brewer(palette = main_palette) +
+  labs(
+    title = "Average Review Volume per Game by Language Over Time",
+    subtitle = "Trends in language-specific review engagement",
+    x = "Year",
+    y = "Average Reviews per Game",
+    color = "Language",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(review_volume_by_year$release_year), 
+                                  max(review_volume_by_year$release_year), by = 1))
+```
+
+A comparison of the number of reviews reveals interesting patterns in user engagement across different language groups. 
+The surge in the number of game releases after 2016 dramatically reduced the average number of reviews; a better model may 
+be needed to study this data. Except for 2012 and 2013, English reviews had the highest average number per game each year. 
+It appears that after 2020, the average number of reviews, regardless of language, shows a declining trend.
+
+## 3.3 Sentiment Gap Analysis
+
+This analysis examines differences in sentiment between Simplified Chinese and English reviews for the same games, revealing potential cultural preferences or variations in reception across language communities.
+
+```{r sentiment-gap}
+# Calculate the sentiment gap by game and year, with manual ratio calculation
+sentiment_gap_by_game <- steam_data %>%
+  filter(!is.na(release_year)) %>%
+  filter(schinese_reviews > 0 & english_reviews > 0) %>%  # Ensure both languages have reviews
+  mutate(
+    # Calculate positive ratios manually to ensure consistency
+    sc_positive_ratio_calc = schinese_positive / schinese_reviews,
+    english_positive_ratio_calc = english_positive / english_reviews,
+    sentiment_gap = sc_positive_ratio_calc - english_positive_ratio_calc
+  )
+
+# Check that calculations match the dataset's provided ratios
+sentiment_check <- sentiment_gap_by_game %>%
+  summarise(
+    avg_sc_ratio_provided = mean(schinese_positive_ratio, na.rm = TRUE),
+    avg_sc_ratio_calculated = mean(sc_positive_ratio_calc, na.rm = TRUE),
+    avg_eng_ratio_provided = mean(english_positive_ratio, na.rm = TRUE),
+    avg_eng_ratio_calculated = mean(english_positive_ratio_calc, na.rm = TRUE)
+  )
+
+# Display the validation check
+format_table(sentiment_check, 
+             caption = "Validation of Manual Calculations vs. Provided Ratios",
+             col.names = c("Avg SC Ratio (Provided)", "Avg SC Ratio (Calculated)", 
+                           "Avg English Ratio (Provided)", "Avg English Ratio (Calculated)"),
+             digits = c(4, 4, 4, 4))
+```
+
+```{r}
+# Summarise the sentiment gap by year
+sentiment_gap_by_year <- sentiment_gap_by_game %>%
+  group_by(release_year) %>%
+  summarise(
+    Games_With_Both = n(),
+    Avg_Sentiment_Gap = mean(sentiment_gap, na.rm = TRUE),
+    Median_Sentiment_Gap = median(sentiment_gap, na.rm = TRUE),
+    SC_Higher_Count = sum(sentiment_gap > 0, na.rm = TRUE),
+    English_Higher_Count = sum(sentiment_gap < 0, na.rm = TRUE),
+    Equal_Count = sum(sentiment_gap == 0, na.rm = TRUE),
+    Avg_SC_Positive_Ratio = mean(sc_positive_ratio_calc, na.rm = TRUE),
+    Avg_English_Positive_Ratio = mean(english_positive_ratio_calc, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    SC_Higher_Pct = SC_Higher_Count / Games_With_Both * 100,
+    English_Higher_Pct = English_Higher_Count / Games_With_Both * 100,
+    Equal_Pct = Equal_Count / Games_With_Both * 100
+  )
+
+# Display the summary table
+format_table(sentiment_gap_by_year, 
+             caption = "Sentiment Gap Between SC and English Reviews by Year",
+             col.names = c("Year", "Games With Both", "Avg Sentiment Gap", "Median Sentiment Gap", 
+                           "SC Higher Count", "English Higher Count", "Equal Count", 
+                           "Avg SC Positive Ratio", "Avg English Positive Ratio",
+                           "SC Higher %", "English Higher %", "Equal %"),
+             digits = c(0, 0, 4, 4, 0, 0, 0, 4, 4, 1, 1, 1))
+```
+
+```{r}
+# Create an bar chart for the average sentiment gap by year
+ggplot(sentiment_gap_by_year, aes(x = release_year, y = Avg_Sentiment_Gap * 100)) +
+  geom_bar(stat = "identity", 
+           fill = ifelse(sentiment_gap_by_year$Avg_Sentiment_Gap >= 0, 
+                         brewer.pal(9, sequential_blue)[6], 
+                         brewer.pal(9, sequential_red)[6])) +
+  geom_text(aes(
+    label = paste0(round(Avg_Sentiment_Gap * 100, 1), "%"),
+    vjust = ifelse(Avg_Sentiment_Gap >= 0, -0.5, 1.5)
+  ),
+  color = "black",
+  fontface = "bold",
+  size = 3.5) +
+  labs(
+    title = "Average Sentiment Gap Between SC and English Reviews",
+    subtitle = "Positive values indicate SC reviews are more positive on average (manually calculated ratios)",
+    x = "Year",
+    y = "Average Sentiment Gap (Percentage Points)",
+    caption = "Source: Steam API Data\nNote: Only includes games with both SC and English reviews"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(sentiment_gap_by_year$release_year), 
+                                  max(sentiment_gap_by_year$release_year), by = 1)) +
+  scale_y_continuous(limits = c(min(sentiment_gap_by_year$Avg_Sentiment_Gap * 100) - 5, 
+                                max(sentiment_gap_by_year$Avg_Sentiment_Gap * 100) + 5))
+```
+
+```{r}
+# Create a visualisation showing the percentage of games where each language has higher sentiment
+sentiment_pct_long <- sentiment_gap_by_year %>%
+  select(release_year, SC_Higher_Pct, English_Higher_Pct, Equal_Pct) %>%
+  pivot_longer(
+    cols = c(SC_Higher_Pct, English_Higher_Pct, Equal_Pct),
+    names_to = "Comparison",
+    values_to = "Percentage"
+  ) %>%
+  mutate(Comparison = case_when(
+    Comparison == "SC_Higher_Pct" ~ "SC More Positive",
+    Comparison == "English_Higher_Pct" ~ "English More Positive",
+    Comparison == "Equal_Pct" ~ "Equal Sentiment"
+  ))
+
+# Create a stacked bar chart for the percentage breakdown
+ggplot(sentiment_pct_long, aes(x = release_year, y = Percentage, fill = Comparison)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Distribution of Sentiment Comparison Between Languages",
+    subtitle = "Percentage of games where each language has more positive reviews (manually calculated)",
+    x = "Year",
+    y = "Percentage of Games",
+    fill = "Comparison Result",
+    caption = "Source: Steam API Data\nNote: Only includes games with both SC and English reviews"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(sentiment_gap_by_year$release_year), 
+                                  max(sentiment_gap_by_year$release_year), by = 1)) +
+  scale_y_continuous(labels = function(x) paste0(round(x, 1), "%"))
+```
+
+```{r}
+# Additional analysis: Compare manually calculated average positive ratios by language and year
+avg_sentiment_long <- sentiment_gap_by_year %>%
+  select(release_year, Avg_SC_Positive_Ratio, Avg_English_Positive_Ratio) %>%
+  pivot_longer(
+    cols = c(Avg_SC_Positive_Ratio, Avg_English_Positive_Ratio),
+    names_to = "Language",
+    values_to = "Positive_Ratio"
+  ) %>%
+  mutate(
+    Language = case_when(
+      Language == "Avg_SC_Positive_Ratio" ~ "Simplified Chinese",
+      Language == "Avg_English_Positive_Ratio" ~ "English"
+    ),
+    Positive_Percent = Positive_Ratio * 100
+  )
+
+# Create a line chart comparing average positive ratios by language
+ggplot(avg_sentiment_long, aes(x = release_year, y = Positive_Percent, 
+                               color = Language, group = Language)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_color_brewer(palette = main_palette) +
+  labs(
+    title = "Average Positive Review Ratio by Language",
+    subtitle = "Comparing manually calculated sentiment between SC and English reviews",
+    x = "Year",
+    y = "Average Positive Review Percentage",
+    color = "Language",
+    caption = "Source: Steam API Data\nNote: Only includes games with both SC and English reviews"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(sentiment_gap_by_year$release_year), 
+                                  max(sentiment_gap_by_year$release_year), by = 1)) +
+  scale_y_continuous(limits = c(0, 100),
+                     labels = function(x) paste0(round(x, 1), "%"))
+```
+
+```{r}
+# Create a boxplot to show the distribution of sentiment gaps by year
+ggplot(sentiment_gap_by_game, aes(x = factor(release_year), y = sentiment_gap * 100)) +
+  geom_boxplot(fill = brewer.pal(9, sequential_blue)[3]) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Distribution of Sentiment Gaps Between SC and English Reviews by Year",
+    subtitle = "Positive values indicate SC reviews are more positive (manually calculated)",
+    x = "Year",
+    y = "Sentiment Gap (SC - English) in Percentage Points",
+    caption = "Source: Steam API Data\nNote: Only includes games with both SC and English reviews"
+  ) +
+  my_theme
+```
+
+An analysis of positive rating ratio reveals interesting differences in the reception of games across different language communities. On average, SC reviews tend to be slightly more negative than English reviews for the same game, especially in recent years. In other words, users who comment in SC are more likely to give a game a not recommend review on Steam. This trend has increased year by year since 2017, suggesting possible cultural differences in expectations, preferences, or review behaviour between SC and English-speaking users.
+
+The stacked bar chart shows that for most games, SC reviews are more negative than English reviews. For games released in 2017 and 2018, the number of games with a higher proportion of positive SC reviews and the number with a higher proportion of positive English reviews were roughly equal. However, by 2024, for games released in that year, less than 30% of games had a higher proportion of positive SC reviews than positive English reviews, which corroborates the data from the previous chart. The box plot distribution further illustrates that while there is considerable variation in the sentiment gap across games, the overall trend leans towards a less positive reception from the SC community. 
+
+These differences in positive rating percentages can be valuable for developers, helping them understand the different evaluations their games may receive in different markets and informing localisation and marketing strategies for specific regions. The increasing negativity in SC reviews is also consistent with the growing importance of SC localisation observed in previous sections.
+
+It is worth noting that the number of SC users on the Steam platform currently exceeds 30%, which is more than English-speaking users. Could the above data indicate, from another angle, that SC users in general are less inclined to leave reviews than users of other languages?
+
+# 4. Price Analysis
+
+This section examines pricing patterns across games on Steam, including regional pricing differences between USD and CNY, relationships between price and localisation status, and price variations by game type (indie vs. non-indie). The analysis explores how pricing strategies vary across different game segments and over time.
+
+## 4.1 Regional Price Comparison: USD vs. CNY
+
+This analysis compares average pricing in US Dollars (USD) and Chinese Yuan (CNY) over time, providing insight into regional pricing strategies and differences.
+
+```{r regional-price-comparison}
+# Check maximum prices and number of games with unknown prices
+max_prices <- steam_data %>%
+  summarise(
+    Max_USD = max(price_usd_numeric, na.rm = TRUE),
+    Max_CNY = max(price_cny_numeric, na.rm = TRUE),
+    Unknown_USD = sum(price_usd == "Unknown", na.rm = TRUE),
+    Unknown_CNY = sum(price_cny == "Unknown", na.rm = TRUE),
+    Free_Games = sum(is_free == TRUE, na.rm = TRUE)
+  )
+
+# Display the summary
+format_table(max_prices, 
+             caption = "Overview of Price Data",
+             col.names = c("Max USD", "Max CNY", "Unknown USD Count", "Unknown CNY Count", "Free Games Count"),
+             digits = c(2, 2, 0, 0, 0))
+```
+
+```{r}
+# Calculate average prices by year (excluding free games for a clearer price trend)
+avg_price_by_year <- steam_data %>%
+  filter(!is.na(release_year) & is_free == FALSE) %>%
+  filter(!is.na(price_usd_numeric) & !is.na(price_cny_numeric)) %>%
+  group_by(release_year) %>%
+  summarise(
+    Games_Count = n(),
+    Avg_USD = mean(price_usd_numeric, na.rm = TRUE),
+    Median_USD = median(price_usd_numeric, na.rm = TRUE),
+    Avg_CNY = mean(price_cny_numeric, na.rm = TRUE),
+    Median_CNY = median(price_cny_numeric, na.rm = TRUE),
+    # Calculate approximate exchange rate (CNY/USD)
+    Avg_Exchange_Rate = mean(price_cny_numeric / price_usd_numeric, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Display the table
+format_table(avg_price_by_year, 
+      caption = "Average and Median Prices by Year (Paid Games Only)",
+      col.names = c("Year", "Games Count", "Avg USD", "Median USD", "Avg CNY", "Median CNY", "Avg Exchange Rate"),
+      digits = c(0, 0, 2, 2, 2, 2, 2))
+```
+
+```{r}
+# Create the dual-axis chart with three lines - using unified colors
+ggplot(avg_price_by_year) +
+  # USD price line
+  geom_line(aes(x = release_year, y = Avg_USD, color = "USD Price"), size = 1, group = 1) +
+  geom_point(aes(x = release_year, y = Avg_USD, color = "USD Price"), size = 3) +
+  # CNY converted to USD line (on USD axis)
+  geom_line(aes(x = release_year, y = Avg_CNY/7, color = "CNY Price (in USD)"), size = 1, group = 1, linetype = "dashed") +
+  geom_point(aes(x = release_year, y = Avg_CNY/7, color = "CNY Price (in USD)"), size = 3) +
+  # Original CNY line (on CNY axis)
+  geom_line(aes(x = release_year, y = Avg_CNY/4, color = "CNY Price"), size = 1, group = 1) +
+  geom_point(aes(x = release_year, y = Avg_CNY/4, color = "CNY Price"), size = 3) +
+  scale_y_continuous(
+    name = "Average Price (USD)",
+    limits = c(0, 25),
+    sec.axis = sec_axis(~.*4, name = "Average Price (CNY)")
+  ) +
+  scale_color_manual(
+    name = "Currency",
+    values = c("USD Price" = "#377EB8", "CNY Price (in USD)" = "#4DAF4A", "CNY Price" = "#E41A1C")
+  ) +
+  labs(
+    title = "Average Game Prices by Currency and Year",
+    subtitle = "Comparing USD, CNY, and CNY converted to USD (7:1 rate)",
+    x = "Release Year",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(avg_price_by_year$release_year), 
+                                  max(avg_price_by_year$release_year), by = 1))
+```
+
+```{r}
+# Create a visualization for the USD average and median prices
+ggplot(avg_price_by_year) +
+  geom_line(aes(x = release_year, y = Avg_USD, color = "Average Price"), size = 1) +
+  geom_point(aes(x = release_year, y = Avg_USD, color = "Average Price"), size = 3) +
+  geom_line(aes(x = release_year, y = Median_USD, color = "Median Price"), size = 1) +
+  geom_point(aes(x = release_year, y = Median_USD, color = "Median Price"), size = 3) +
+  scale_color_manual(
+    name = "Price Type",
+    values = c("Average Price" = "#E41A1C", "Median Price" = "#FB9A99")
+  ) +
+  labs(
+    title = "Average and Median USD Prices by Year",
+    subtitle = "Comparing central tendency measures for USD game prices",
+    x = "Release Year",
+    y = "Price (USD)",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(avg_price_by_year$release_year), 
+                                  max(avg_price_by_year$release_year), by = 1))
+```
+
+```{r}
+# Create a visualization for the CNY average and median prices
+ggplot(avg_price_by_year) +
+  geom_line(aes(x = release_year, y = Avg_CNY, color = "Average Price"), size = 1) +
+  geom_point(aes(x = release_year, y = Avg_CNY, color = "Average Price"), size = 3) +
+  geom_line(aes(x = release_year, y = Median_CNY, color = "Median Price"), size = 1) +
+  geom_point(aes(x = release_year, y = Median_CNY, color = "Median Price"), size = 3) +
+  scale_color_manual(
+    name = "Price Type",
+    values = c("Average Price" = "#E41A1C", "Median Price" = "#FB9A99")
+  ) +
+  labs(
+    title = "Average and Median CNY Prices by Year",
+    subtitle = "Comparing central tendency measures for CNY game prices",
+    x = "Release Year",
+    y = "Price (CNY)",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(avg_price_by_year$release_year), 
+                                  max(avg_price_by_year$release_year), by = 1))
+```
+
+A comparison of regional pricing reveals different pricing strategies across markets. The USD price shows a general upward trend over time, starting from 2016, particularly in recent years. The RMB price also follows a similar pattern, but when converted to USD (using a fixed exchange rate of 1:7), it is generally lower than the actual USD price. The actual ratio is closer to a more favourable 1:4, indicating that the vast majority of games released are regionally priced for the Chinese market, in line with Steam's relevant guidance documents. This reflects differences in purchasing power and market conditions between different regions.
+
+The comparison between the average price and the median price reveals a right-skewness in the price distribution for both currencies, with the average consistently higher than the median. This suggests that while most games are priced at a lower level, a small number of higher-priced games pull the average upwards. Starting from 2021, the median price of games sold in the US Steam store has stabilised at around $15, while the median price of games sold in the mainland China Steam store has been slowly increasing during the same period. This reflects that many publishers are gradually increasing their expectations of purchasing power in the mainland Chinese market when pricing games.
+
+## 4.2 Price to Localisation Relationship
+
+This section explores whether games with Chinese localisation support command different prices compared to those without localisation, examining potential market value of language support.
+
+```{r price-localisation}
+# Check if games with Chinese localisation command higher prices
+# Create a flag for any Chinese localisation if not already done
+if(!"loc_depth_category" %in% colnames(steam_data)) {
+  steam_data <- steam_data %>%
+    mutate(
+      loc_depth_category = case_when(
+        chinese_simplified_audio == TRUE ~ "CS interface/text + dubbing",
+        chinese_simplified_interface_subtitles == TRUE ~ "Only CS interface/text",
+        TRUE ~ "No CS localisation"
+      )
+    )
+}
+
+# Compare prices by localisation status and year
+price_by_loc_year <- steam_data %>%
+  filter(!is.na(release_year) & !is.na(price_usd_numeric)) %>%
+  group_by(release_year, has_chinese_loc) %>%
+  summarise(
+    Games_Count = n(),
+    Avg_USD = mean(price_usd_numeric, na.rm = TRUE),
+    Median_USD = median(price_usd_numeric, na.rm = TRUE),
+    Avg_CNY = mean(price_cny_numeric, na.rm = TRUE),
+    Median_CNY = median(price_cny_numeric, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Localisation_Status = ifelse(has_chinese_loc, "With Chinese Support", "Without Chinese Support")
+  )
+
+# Display the comparison table
+format_table(price_by_loc_year %>% select(-has_chinese_loc), 
+      caption = "Average Prices by Chinese Localisation Status and Year",
+      col.names = c("Year", "Localisation Status", "Games Count", "Avg USD", "Median USD", "Avg CNY", "Median CNY"),
+      digits = c(0, 0, 0, 2, 2, 2, 2))
+```
+
+```{r}
+# Create a visualization for the USD price comparison
+ggplot(price_by_loc_year, aes(x = release_year, y = Avg_USD, 
+                              color = Localisation_Status, group = Localisation_Status)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  scale_color_brewer(palette = alt_palette) +
+  labs(
+    title = "Average USD Price by Chinese Localisation Status",
+    subtitle = "Comparing games with and without Chinese language support",
+    x = "Release Year",
+    y = "Average Price (USD)",
+    color = "Localisation Status",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(price_by_loc_year$release_year), 
+                                  max(price_by_loc_year$release_year), by = 1))
+```
+
+```{r}
+# Create a visualization for the CNY price comparison
+ggplot(price_by_loc_year, aes(x = release_year, y = Avg_CNY, 
+                              color = Localisation_Status, group = Localisation_Status)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  scale_color_brewer(palette = alt_palette) +
+  labs(
+    title = "Average CNY Price by Chinese Localisation Status",
+    subtitle = "Comparing games with and without Chinese language support",
+    x = "Release Year",
+    y = "Average Price (CNY)",
+    color = "Localisation Status",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(price_by_loc_year$release_year), 
+                                  max(price_by_loc_year$release_year), by = 1))
+```
+
+```{r}
+# More detailed analysis by localisation depth
+price_by_loc_depth <- steam_data %>%
+  filter(!is.na(release_year) & !is.na(price_usd_numeric)) %>%
+  group_by(loc_depth_category) %>%
+  summarise(
+    Games_Count = n(),
+    Avg_USD = mean(price_usd_numeric, na.rm = TRUE),
+    Median_USD = median(price_usd_numeric, na.rm = TRUE),
+    Avg_CNY = mean(price_cny_numeric, na.rm = TRUE),
+    Median_CNY = median(price_cny_numeric, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Display the detailed comparison table
+format_table(price_by_loc_depth, 
+      caption = "Average Prices by SC Localisation Depth",
+      col.names = c("Localisation Depth", "Games Count", "Avg USD", "Median USD", "Avg CNY", "Median CNY"),
+      digits = c(0, 0, 2, 2, 2, 2))
+```
+
+```{r}
+# Visualize the detailed price by localisation depth for USD
+ggplot(price_by_loc_depth, aes(x = reorder(loc_depth_category, Avg_USD), y = Avg_USD, fill = loc_depth_category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0("$", round(Avg_USD, 2))), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = sequential_blue) +
+  labs(
+    title = "Average USD Price by SC Localisation Depth",
+    subtitle = "Comparing pricing across different levels of Simplified Chinese support",
+    x = "Localisation Depth",
+    y = "Average Price (USD)",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Visualize the detailed price by localisation depth for CNY
+ggplot(price_by_loc_depth, aes(x = reorder(loc_depth_category, Avg_CNY), y = Avg_CNY, fill = loc_depth_category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0("¥", round(Avg_CNY, 0))), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = sequential_red) +
+  labs(
+    title = "Average CNY Price by SC Localisation Depth",
+    subtitle = "Comparing pricing across different levels of Simplified Chinese support",
+    x = "Localisation Depth",
+    y = "Average Price (CNY)",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(legend.position = "none")
+```
+
+An analysis of prices according to localisation status reveals a consistent pattern (except for 2013): games offering Chinese language support are typically priced higher than those without. This price premium is evident in both USD and RMB pricing and, when linked to the analysis in the context, may indicate that games with a higher average selling price (non-indie games) are more likely to support Chinese localisation, either during development or after the game's release.
+
+There is no discernible pattern between price and the depth of localisation. Games offering full Simplified Chinese support (interface/text plus audio dubbing) have a lower average price than those offering only interface/text support, but a slightly higher average price than games without any Chinese localisation. The reasons for this are worth investigating further.
+
+## 4.3 Price to Indie Relationship
+
+This section compares pricing patterns between indie and non-indie games, examining how different market segments approach pricing strategies.
+
+```{r price-indie}
+if(!"has_indie_tag" %in% colnames(steam_data)) {
+  # Create a function to check if "Indie" is in the game_tags string
+  has_indie_tag <- function(tags_str) {
+    # Check if the string contains 'Indie' as a distinct tag
+    return(grepl("'Indie'", tags_str, fixed = TRUE))
+  }
+  
+  # Apply this function to determine if a game is indie
+  steam_data <- steam_data %>%
+    mutate(has_indie_tag = has_indie_tag(game_tags))
+}
+
+# Compare prices between indie and non-indie games by year
+price_by_indie_year <- steam_data %>%
+  filter(!is.na(release_year) & !is.na(price_usd_numeric)) %>%
+  group_by(release_year, has_indie_tag) %>%  # Changed from has_indie_genre to has_indie_tag
+  summarise(
+    Games_Count = n(),
+    Avg_USD = mean(price_usd_numeric, na.rm = TRUE),
+    Median_USD = median(price_usd_numeric, na.rm = TRUE),
+    Avg_CNY = mean(price_cny_numeric, na.rm = TRUE),
+    Median_CNY = median(price_cny_numeric, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Game_Type = ifelse(has_indie_tag, "Indie Games", "Non-Indie Games")  # Changed from has_indie_genre to has_indie_tag
+  )
+
+# Display the comparison table
+format_table(price_by_indie_year %>% select(-has_indie_tag), 
+      caption = "Average Prices by Indie Status and Year",
+      col.names = c("Year", "Game Type", "Games Count", "Avg USD", "Median USD", "Avg CNY", "Median CNY"),
+      digits = c(0, 0, 0, 2, 2, 2, 2))
+```
+
+```{r}
+# Create a visualization for the USD price comparison
+ggplot(price_by_indie_year, aes(x = release_year, y = Avg_USD, 
+                                color = Game_Type, group = Game_Type)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  scale_color_brewer(palette = main_palette) +
+  labs(
+    title = "Average USD Price: Indie vs. Non-Indie Games",
+    subtitle = "Comparing pricing trends by game type over time",
+    x = "Release Year",
+    y = "Average Price (USD)",
+    color = "Game Type",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(price_by_indie_year$release_year), 
+                                  max(price_by_indie_year$release_year), by = 1))
+```
+
+```{r}
+# Create a visualization for the CNY price comparison
+ggplot(price_by_indie_year, aes(x = release_year, y = Avg_CNY, 
+                                color = Game_Type, group = Game_Type)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  scale_color_brewer(palette = main_palette) +
+  labs(
+    title = "Average CNY Price: Indie vs. Non-Indie Games",
+    subtitle = "Comparing pricing trends by game type over time",
+    x = "Release Year",
+    y = "Average Price (CNY)",
+    color = "Game Type",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(price_by_indie_year$release_year), 
+                                  max(price_by_indie_year$release_year), by = 1))
+```
+
+```{r}
+# Calculate price difference between indie and non-indie games by year
+price_diff_by_year <- price_by_indie_year %>%
+  select(release_year, Game_Type, Avg_USD, Avg_CNY) %>%
+  pivot_wider(
+    names_from = Game_Type,
+    values_from = c(Avg_USD, Avg_CNY)
+  ) %>%
+  mutate(
+    USD_Price_Difference = `Avg_USD_Non-Indie Games` - `Avg_USD_Indie Games`,
+    USD_Percentage_Difference = (USD_Price_Difference / `Avg_USD_Indie Games`) * 100,
+    CNY_Price_Difference = `Avg_CNY_Non-Indie Games` - `Avg_CNY_Indie Games`,
+    CNY_Percentage_Difference = (CNY_Price_Difference / `Avg_CNY_Indie Games`) * 100
+  )
+
+# Display the difference table
+format_table(price_diff_by_year %>% select(release_year, 
+                                    `Avg_USD_Indie Games`, `Avg_USD_Non-Indie Games`, USD_Price_Difference, USD_Percentage_Difference,
+                                    `Avg_CNY_Indie Games`, `Avg_CNY_Non-Indie Games`, CNY_Price_Difference, CNY_Percentage_Difference), 
+      caption = "Price Difference Between Indie and Non-Indie Games by Year",
+      col.names = c("Year", "Indie USD", "Non-Indie USD", "USD Diff", "USD Diff %", 
+                   "Indie CNY", "Non-Indie CNY", "CNY Diff", "CNY Diff %"),
+      digits = c(0, 2, 2, 2, 1, 2, 2, 2, 1))
+```
+
+```{r}
+# Visualise the USD price difference over time
+ggplot(price_diff_by_year, aes(x = release_year, y = USD_Price_Difference)) +
+  geom_bar(stat = "identity", fill = brewer.pal(8, main_palette)[2]) +
+  geom_text(aes(label = paste0("$", round(USD_Price_Difference, 2))), 
+            vjust = ifelse(price_diff_by_year$USD_Price_Difference >= 0, -0.5, 1.5), 
+            size = 3.5) +
+  labs(
+    title = "USD Price Gap Between Non-Indie and Indie Games",
+    subtitle = "Absolute price difference in USD by release year",
+    x = "Release Year",
+    y = "Price Difference (USD)",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(price_diff_by_year$release_year), 
+                                  max(price_diff_by_year$release_year), by = 1))
+```
+
+```{r}
+# Visualize the CNY price difference over time
+ggplot(price_diff_by_year, aes(x = release_year, y = CNY_Price_Difference)) +
+  geom_bar(stat = "identity", fill = brewer.pal(8, main_palette)[1]) +
+  geom_text(aes(label = paste0("¥", round(CNY_Price_Difference, 0))), 
+            vjust = ifelse(price_diff_by_year$CNY_Price_Difference >= 0, -0.5, 1.5), 
+            size = 3.5) +
+  labs(
+    title = "CNY Price Gap Between Non-Indie and Indie Games",
+    subtitle = "Absolute price difference in CNY by release year",
+    x = "Release Year",
+    y = "Price Difference (CNY)",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(price_diff_by_year$release_year), 
+                                  max(price_diff_by_year$release_year), by = 1))
+```
+
+A comparison between indie games and non-indie games reveals significant differences in pricing strategies. Non-indie games consistently maintain higher prices in both US dollars and Chinese Yuan (RMB), with a considerable gap compared to the average pricing of indie games, particularly after 2016. This price difference likely reflects a variety of factors, including differences in development costs, brand recognition, and perceived consumer value.
+
+Analysis of the price gap indicates that, after 2016, the average price of non-indie games was approximately 100% higher than that of indie games, with the percentage difference varying by year. This percentage difference was consistently higher in the mainland China Steam market than in the US market after 2016, possibly suggesting that indie games in mainland China store are priced relatively more affordably. The absolute price difference has generally increased slowly over time, especially in recent years, indicating a divergence in pricing strategies between indie and non-indie game developers as the market has matured.
+
+## 4.4 Price to Early Access Relationship
+
+This section examines the relationship between Early Access status and pricing, including how Early Access games overlap with the indie category and how this affects pricing strategies.
+
+```{r price-early-access}
+# Identify Early Access games from game_tags
+has_early_access_tag <- function(tags_str) {
+  return(grepl("'Early Access'", tags_str, fixed = TRUE))
+}
+
+# Apply the function to identify Early Access games
+steam_data <- steam_data %>%
+  mutate(is_early_access = has_early_access_tag(game_tags))
+
+# Check overlap between Indie and Early Access tags
+indie_early_access_overlap <- steam_data %>%
+  summarise(
+    Total_Games = n(),
+    Indie_Games = sum(has_indie_tag, na.rm = TRUE),
+    Early_Access_Games = sum(is_early_access, na.rm = TRUE),
+    Both_Tags = sum(has_indie_tag & is_early_access, na.rm = TRUE)
+  ) %>%
+  mutate(
+    Indie_Percentage = Indie_Games / Total_Games * 100,
+    Early_Access_Percentage = Early_Access_Games / Total_Games * 100,
+    Both_Tags_Percentage = Both_Tags / Total_Games * 100,
+    EA_With_Indie_Percentage = Both_Tags / Early_Access_Games * 100,
+    Indie_With_EA_Percentage = Both_Tags / Indie_Games * 100
+  )
+
+# Display the overlap summary
+format_table(indie_early_access_overlap, 
+             caption = "Overlap Between Indie and Early Access Games",
+             col.names = c("Total Games", "Indie Games", "Early Access Games", "Both Tags", 
+                          "Indie %", "Early Access %", "Both Tags %", 
+                          "EA with Indie %", "Indie with EA %"),
+             digits = c(0, 0, 0, 0, 1, 1, 1, 1, 1))
+```
+
+```{r}
+# Create a Venn diagram-like representation using a scaled plot
+overlap_data <- data.frame(
+  Category = c("Indie Only", "Early Access Only", "Both"),
+  Count = c(
+    indie_early_access_overlap$Indie_Games - indie_early_access_overlap$Both_Tags,
+    indie_early_access_overlap$Early_Access_Games - indie_early_access_overlap$Both_Tags,
+    indie_early_access_overlap$Both_Tags
+  )
+)
+
+# Plot the overlap with unified colors
+ggplot(overlap_data, aes(x = reorder(Category, Count), y = Count, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Count), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Overlap Between Indie and Early Access Games",
+    subtitle = "Number of games in each category",
+    x = NULL,
+    y = "Number of Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(legend.position = "none")
+
+# Compare prices between Early Access, Indie, Both, and Neither
+game_category <- steam_data %>%
+  mutate(
+    Category = case_when(
+      has_indie_tag & is_early_access ~ "Both Indie & Early Access",
+      has_indie_tag ~ "Indie Only",
+      is_early_access ~ "Early Access Only",
+      TRUE ~ "Neither"
+    )
+  )
+```
+
+```{r}
+# Calculate average prices by category
+price_by_category <- game_category %>%
+  filter(!is.na(price_usd_numeric)) %>%
+  group_by(Category) %>%
+  summarise(
+    Games_Count = n(),
+    Avg_USD = mean(price_usd_numeric, na.rm = TRUE),
+    Median_USD = median(price_usd_numeric, na.rm = TRUE),
+    Avg_CNY = mean(price_cny_numeric, na.rm = TRUE),
+    Median_CNY = median(price_cny_numeric, na.rm = TRUE),
+    Free_Games = sum(is_free, na.rm = TRUE),
+    Free_Percentage = sum(is_free, na.rm = TRUE) / n() * 100,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Avg_USD))
+
+# Display the price by category table
+format_table(price_by_category, 
+      caption = "Average Prices by Game Category",
+      col.names = c("Category", "Games Count", "Avg USD", "Median USD", "Avg CNY", "Median CNY", 
+                   "Free Games", "Free %"),
+      digits = c(0, 0, 2, 2, 2, 2, 0, 1))
+```
+
+```{r}
+# Visualise the USD price comparison
+ggplot(price_by_category, aes(x = reorder(Category, Avg_USD), y = Avg_USD, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0("$", round(Avg_USD, 2))), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = sequential_blue) +
+  labs(
+    title = "Average USD Price by Game Category",
+    subtitle = "Comparing Early Access and Indie game pricing",
+    x = "Game Category",
+    y = "Average Price (USD)",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Visualise the CNY price comparison
+ggplot(price_by_category, aes(x = reorder(Category, Avg_CNY), y = Avg_CNY, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0("¥", round(Avg_CNY, 0))), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = sequential_red) +
+  labs(
+    title = "Average CNY Price by Game Category",
+    subtitle = "Comparing Early Access and Indie game pricing",
+    x = "Game Category",
+    y = "Average Price (CNY)",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Also compare free game percentages by category
+ggplot(price_by_category, aes(x = reorder(Category, -Free_Percentage), y = Free_Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Free_Percentage, 1), "%")), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = alt_palette) +
+  labs(
+    title = "Percentage of Free-to-Play Games by Category",
+    subtitle = "Comparing Early Access and Indie games",
+    x = "Game Category",
+    y = "Percentage of Free Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(legend.position = "none")
+```
+
+### 4.4.1 If We Focus on Recent Trends From 2022 to 2025
+
+```{r price-early-access-2022-2025}
+# Filter for recent games (2022-2025)
+recent_games <- steam_data %>%
+  filter(release_year >= 2022 & release_year <= 2025)
+
+# Create category flags for all time data
+steam_data <- steam_data %>%
+  mutate(
+    category_type = case_when(
+      has_indie_tag & is_early_access ~ "Both Indie & EA",
+      has_indie_tag ~ "Only Indie",
+      is_early_access ~ "Only EA",
+      TRUE ~ "Neither"
+    )
+  )
+
+# Create category flags for recent data
+recent_games <- recent_games %>%
+  mutate(
+    category_type = case_when(
+      has_indie_tag & is_early_access ~ "Both Indie & EA",
+      has_indie_tag ~ "Only Indie",
+      is_early_access ~ "Only EA",
+      TRUE ~ "Neither"
+    )
+  )
+
+# Count games by category for all time
+all_time_counts <- steam_data %>%
+  group_by(category_type) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100) %>%
+  filter(category_type %in% c("Only Indie", "Only EA", "Both Indie & EA")) %>%
+  mutate(Period = "All-Time")
+
+# Count games by category for recent period
+recent_counts <- recent_games %>%
+  group_by(category_type) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100) %>%
+  filter(category_type %in% c("Only Indie", "Only EA", "Both Indie & EA")) %>%
+  mutate(Period = "2022-2025")
+
+# Combine the data for comparison
+comparison_data <- bind_rows(all_time_counts, recent_counts) %>%
+  # Set the order of categories
+  mutate(category_type = factor(category_type, 
+                                levels = c("Only EA", "Only Indie", "Both Indie & EA")))
+
+# Display the comparison data
+format_table(comparison_data, 
+             caption = "Comparison of Indie and Early Access Game Distribution",
+             col.names = c("Game Category", "Count", "Percentage", "Period"),
+             digits = c(0, 0, 1, 0))
+```
+
+```{r}
+# Create a comparison bar chart showing percentage of games in each category
+ggplot(comparison_data, aes(x = category_type, y = percentage, fill = Period)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = main_palette) +
+  labs(
+    title = "Comparison of Indie and Early Access Game Trends",
+    subtitle = "All-Time vs Recent Releases (2022-2025)",
+    x = "Game Category",
+    y = "Percentage of Total Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))  # Override angle for better readability of short labels
+```
+
+```{r}
+# Create a stacked bar chart to compare absolute counts
+ggplot(comparison_data, aes(x = Period, y = count, fill = category_type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(aes(label = count), 
+            position = position_stack(vjust = 0.5), size = 3.5) +
+  scale_fill_brewer(palette = alt_palette, name = "Game Category") +
+  labs(
+    title = "Number of Games by Category and Period",
+    subtitle = "Comparing game type distribution over time",
+    x = "Time Period",
+    y = "Number of Games",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))  # Override angle for better readability
+```
+
+An analysis of Early Access games reveals their connection with the indie game category and pricing strategies. There is significant overlap between Early Access games and indie games, with nearly 80% of Early Access games also classified as indie games. This suggests that Early Access, as a development and funding model, is particularly popular among indie developers.
+
+A comparison of prices across categories shows that games that are neither indie nor Early Access have the highest average price, followed by Early Access games that are not indie. Games that belong to the indie category but are not Early Access have the lowest average price. This pricing hierarchy reflects the different market positions and development approaches in these segments.
+
+Furthermore, the free-to-play model is most common among games that are neither indie nor Early Access, which may reflect the strategy of free-to-play games to build a player base or achieve profitability through long-term service support (game updates) and in-game purchases rather than upfront costs.
+
+If the perspective is limited to the period from 2022 to 2025, and compared with the full-period statistical data, it can be seen that the proportion of games that are only Early Access and games that are both indie and Early Access has slightly increased, while the proportion of games that are only indie has slightly decreased. At the same time, the proportion of games with the Early Access tag is higher in recent years, which is also in line with general intuition.
+
+## 4.5 Regional Price Differences Over Time
+
+This section examines how regional pricing ratios and growth rates have changed over time, revealing trends in international pricing strategies.
+
+```{r regional-price-differences}
+# Calculate the price ratio between CNY and USD by year 
+# (for games with both prices available and not free)
+regional_price_diff <- steam_data %>%
+  filter(!is.na(release_year) & !is.na(price_usd_numeric) & !is.na(price_cny_numeric)) %>%
+  filter(price_usd_numeric > 0 & price_cny_numeric > 0) %>%  # Exclude free games and unknown prices
+  mutate(
+    price_ratio = price_cny_numeric / price_usd_numeric
+  ) %>%
+  group_by(release_year) %>%
+  summarise(
+    Games_Count = n(),
+    Avg_Ratio = mean(price_ratio, na.rm = TRUE),
+    Median_Ratio = median(price_ratio, na.rm = TRUE),
+    Min_Ratio = min(price_ratio, na.rm = TRUE),
+    Max_Ratio = max(price_ratio, na.rm = TRUE),
+    SD_Ratio = sd(price_ratio, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Display the price ratio table
+format_table(regional_price_diff, 
+      caption = "CNY/USD Price Ratio Trends by Year",
+      col.names = c("Year", "Games Count", "Avg Ratio", "Median Ratio", "Min Ratio", "Max Ratio", "SD Ratio"),
+      digits = c(0, 0, 2, 2, 2, 2, 2))
+```
+
+```{r}
+# Visualize the price ratio trend with confidence intervals
+# Using a colour from the main palette for consistency
+main_color <- brewer.pal(8, main_palette)[1]  # First color from main palette
+
+ggplot(regional_price_diff, aes(x = release_year, y = Avg_Ratio)) +
+  geom_line(size = 1, color = main_color) +
+  geom_point(size = 3, color = main_color) +
+  geom_errorbar(aes(ymin = Avg_Ratio - SD_Ratio, ymax = Avg_Ratio + SD_Ratio),
+                width = 0.2, color = main_color, alpha = 0.5) +
+  geom_text(aes(label = round(Avg_Ratio, 1)), vjust = -0.8, size = 3.5) +
+  labs(
+    title = "Average CNY/USD Price Ratio Trend",
+    subtitle = "With standard deviation error bars",
+    x = "Release Year",
+    y = "Average CNY/USD Price Ratio",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(regional_price_diff$release_year), 
+                                  max(regional_price_diff$release_year), by = 1))
+```
+
+```{r}
+# Compare price growth rates in USD and CNY
+price_growth <- avg_price_by_year %>%
+  arrange(release_year) %>%
+  mutate(
+    USD_YoY_Change = c(NA, diff(Avg_USD) / lag(Avg_USD)[-1] * 100),
+    CNY_YoY_Change = c(NA, diff(Avg_CNY) / lag(Avg_CNY)[-1] * 100)
+  )
+
+# Display the price growth table
+format_table(price_growth %>% select(release_year, Avg_USD, USD_YoY_Change, Avg_CNY, CNY_YoY_Change), 
+      caption = "Year-over-Year Price Growth Rate Comparison",
+      col.names = c("Year", "Avg USD", "USD YoY Change %", "Avg CNY", "CNY YoY Change %"),
+      digits = c(0, 2, 1, 2, 1))
+```
+
+```{r}
+# Visualize the price growth rates side by side
+growth_long <- price_growth %>%
+  select(release_year, USD_YoY_Change, CNY_YoY_Change) %>%
+  filter(!is.na(USD_YoY_Change)) %>%  # Remove the first year with NA
+  pivot_longer(
+    cols = c(USD_YoY_Change, CNY_YoY_Change),
+    names_to = "Currency",
+    values_to = "YoY_Change"
+  ) %>%
+  mutate(Currency = case_when(
+    Currency == "USD_YoY_Change" ~ "US Dollar",
+    Currency == "CNY_YoY_Change" ~ "Chinese Yuan"
+  ))
+
+# Create a grouped bar chart for year-over-year growth rates
+ggplot(growth_long, aes(x = release_year, y = YoY_Change, fill = Currency)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = paste0(round(YoY_Change, 1), "%")), 
+            position = position_dodge(width = 0.9), 
+            vjust = ifelse(growth_long$YoY_Change >= 0, -0.5, 1.5),
+            size = 3.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  scale_fill_brewer(palette = main_palette) +
+  labs(
+    title = "Year-over-Year Price Growth Rate Comparison",
+    subtitle = "Comparing annual price changes between USD and CNY",
+    x = "Release Year",
+    y = "Year-over-Year Change (%)",
+    fill = "Currency",
+    caption = "Source: Steam API Data"
+  ) +
+  my_theme +
+  scale_x_continuous(breaks = seq(min(growth_long$release_year), 
+                                  max(growth_long$release_year), by = 1))
+```
+
+An analysis of regional price differences reveals valuable insights into how games are priced in different markets. The USD/CNY price ratio typically fluctuates slightly around 1:4, while the actual exchange rate has fluctuated between approximately 1:6.7 and 1:7.3 in recent years. This means that the pricing in the mainland Chinese Steam store is about 40% cheaper than that in the US store. This suggests that publishers generally make market-specific adjustments based on local conditions rather than using the actual exchange rate as a benchmark, which is consistent with mainland China's positioning as a low-price region on Steam.
+
+The standard deviation of the price ratio indicates significant differences in pricing strategies among different games, with some publishers implementing more aggressive regional pricing adjustments than others. This variability may reflect different approaches to addressing purchasing power disparities or competitive positioning in the Chinese market, which will be investigated later.
+
+A comparison of year-on-year growth rates shows that prices in both currencies have generally increased over time after entering 2017, but not always at the same rate. In general, CNY pricing mostly has a faster growth rate or a slower decline rate compared to USD pricing. These differences in growth rates suggest that publishers' pricing strategies in mainland China are evolving as the global and Chinese game markets mature.
