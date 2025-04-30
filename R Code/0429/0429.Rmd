@@ -1,0 +1,1800 @@
+---
+title: 'Chinese Localisation Impact on Game Popularity: Regression Analysis Report'
+author: "Huixian Chen"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: '3'
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    fig_caption: true
+    keep_tex: true
+documentclass: article
+geometry: margin=1in
+header-includes:
+- \usepackage{booktabs}
+- \usepackage{longtable}
+- \usepackage{array}
+- \usepackage{multirow}
+- \usepackage{float}
+- \usepackage{colortbl}
+- \usepackage{pdflscape}
+- \usepackage{tabu}
+- \usepackage{threeparttable}
+- \usepackage{threeparttablex}
+- \usepackage[normalem]{ulem}
+- \usepackage{makecell}
+- \usepackage{xcolor}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                     fig.width = 7, fig.height = 5, fig.pos = "H")
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(tidyverse)
+library(kableExtra)
+library(betareg)
+library(sandwich)
+library(lmtest)
+library(ggplot2)
+library(car)
+library(ggeffects)
+
+# Load the saved model objects
+load("C:/Users/Gairui/OneDrive - University College London/Dissertation/Data Analysis/R Code/R code for 0424/0428.RData")
+```
+
+# Introduction
+
+This report examines the impact of Chinese localisation on game popularity on the Steam platform. I focus on two key metrics to assess popularity:
+
+1. **Chinese Player Base**: Measured by the proportion of Chinese reviews relative to total reviews (`sc_ratio`)
+2. **Chinese Player Sentiment**: Measured by the sentiment gap between Chinese and English reviews (`sentiment_gap`)
+
+Our analysis addresses the following research questions:
+
+1. **Base Effect**: How does Chinese localisation impact game popularity among Chinese players?
+2. **Temporal Changes**: Has the effect of localisation diminished over time as localisation becomes more common?
+3. **Text Intensity**: Does localisation matter more for games with higher text intensity?
+4. **Price Sensitivity**: Do players care less about localisation for cheaper or indie games?
+
+# Methodology
+
+## Data Description
+
+The dataset contains information on Steam games, including:
+
+- Game characteristics (release year, game tags, genres)
+- Localisation status (Chinese simplified/traditional text and audio)
+- Review metrics (by language, positive/negative sentiment)
+- Pricing information (USD and CNY)
+
+Genre information was processed using factor analysis to create 15 genre factors, reducing dimensionality while preserving important genre information.
+
+## Model Specifications
+
+I use two primary modelling approaches:
+
+1. **Beta Regression Models**: For the Chinese review ratio (`sc_ratio_adj`), which is bounded between 0 and 1
+2. **Weighted Least Squares**: For the sentiment gap (`sentiment_gap`), with robust standard errors to address heteroscedasticity
+
+Each model includes controls for:
+- Release year
+- Log-transformed total reviews (proxy for overall popularity)
+- Genre factors
+
+## Variable Definitions
+
+- **full_localisation_combo**: Four-level factor indicating Chinese localisation status:
+  - "Audio + Text" (full localisation)
+  - "Audio Only" (voice acting but no text, which doesn't exist in our case)
+  - "Text Only" (text/interface but no voice)
+  - "None" (no Chinese localisation)
+  
+- **text_heavy_game**: Binary indicator for games with significant text content (tagged as "Story Rich" or "Visual Novel")
+
+- **has_indie**: Binary indicator for indie games
+
+- **price_usd_category/price_cny_category**: Five-level categories based on conventional industrial standard:
+  - "Free"
+  - "Budget/Indie" 
+  - "Mid-tier"
+  - "Major Release"
+  - "Premium AAA"
+
+# Results
+
+## Basic Models: Impact of Chinese Localisation
+
+### Chinese Review Ratio (Beta Regression)
+
+```{r basic-model-review-ratio}
+# Table for the base model examining Chinese review ratio
+
+tab_model(model13, 
+          title = "Impact of Chinese Localisation on Chinese Review Ratio",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "City Builders & Economic Management",
+                         "Detective & Interactive Narrative",
+                         "Atmospheric Retro RPGs",
+                         "Turn-Based Tactical Party RPGs",
+                         "Couch Co-Op & Local Multiplayer",
+                         "Free-to-Play MMOs & Competitive",
+                         "Military Strategy & War Sims",
+                         "Family-Friendly Casual Games",
+                         "Skill-Based Action RPGs",
+                         "Immersive 3D Simulations & Driving",
+                         "Survival Horror & Dark Adventure",
+                         "Chaotic Top-Down Shooters",
+                         "Roguelike Deckbuilders",
+                         "Sci-Fi Space & Futuristic",
+                         "Comedy & Dark Humor"),
+          dv.labels = "Simplified Chinese Review Ratio (Beta Regression)",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+
+```
+
+**Interpretation:**
+
+This basic model explores the relationship between Chinese localisation levels and the proportion of Chinese reviews (sc_ratio_adj) using beta regression, which is appropriate for modelling proportions bounded between 0 and 1.
+
+The results provide strong evidence that Chinese localisation significantly influences a game's popularity among Chinese players. With "Audio + Text" as the reference category (representing full Chinese localisation), I observe substantial negative effects for both "None" and "Text Only" localisation levels.
+
+The odds ratio for "None" (0.27) indicates that games without any Chinese localisation have approximately 73% lower odds of attracting Chinese players compared to fully localised games, holding other factors constant. This represents a dramatic reduction in Chinese player engagement when localisation is completely absent.
+
+Similarly, the odds ratio for "Text Only" (0.82) shows that games with only text localisation (interface/subtitles) but no Chinese audio have approximately 18% lower odds of attracting Chinese players compared to fully localised games. This demonstrates that while text localisation provides a significant improvement over no localisation, the absence of Chinese audio still slightly reduces Chinese player engagement.
+
+These findings highlight the crucial role of comprehensive localisation in the Chinese gaming market. The stark difference between no localisation and text-only localisation (with odds ratios of 0.27 versus 0.82) demonstrates that even partial localisation efforts can substantially increase Chinese player engagement, though full localisation yields the best results.
+
+Among the control variables, the log of total reviews shows a significant positive relationship with Chinese review ratio, suggesting that more popular games generally have higher proportions of Chinese players. This could reflect greater marketing reach, wider availability, or network effects that attract Chinese players to globally popular titles.
+
+Several genre factors also show significant relationships with Chinese review ratio, indicating that game content preferences vary among Chinese players compared to the global player base. Notably, the "Chaotic Top-Down Shooters", City Builders & Economic Management"  and "Sci-Fi Space & Futuristic" factors show positive associations with Chinese review proportion, suggesting these genres have particular appeal in the Chinese market.
+
+Overall, this model offers robust evidence for the economic value of investing in comprehensive Chinese localisation, particularly for developers seeking to maximise their game's reach in the Chinese market. The substantial improvement from no localisation to text-only localisation suggests that even limited localisation efforts can yield significant returns in terms of Chinese player engagement.
+
+### Sentiment Gap (WLS Regression)
+
+```{r basic-model-sentiment-gap}
+# Table for the base model examining sentiment gap
+
+tab_model(model9_sg_wls, 
+          title = "Impact of Chinese Localisation on Sentiment Gap (Chinese vs English)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only", 
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "City Builders & Economic Management",
+                         "Detective & Interactive Narrative",
+                         "Atmospheric Retro RPGs",
+                         "Turn-Based Tactical Party RPGs",
+                         "Couch Co-Op & Local Multiplayer",
+                         "Free-to-Play MMOs & Competitive",
+                         "Military Strategy & War Sims",
+                         "Family-Friendly Casual Games",
+                         "Skill-Based Action RPGs",
+                         "Immersive 3D Simulations & Driving",
+                         "Survival Horror & Dark Adventure",
+                         "Chaotic Top-Down Shooters",
+                         "Roguelike Deckbuilders",
+                         "Sci-Fi Space & Futuristic",
+                         "Comedy & Dark Humor"),
+          dv.labels = "WLS Regression",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+
+# Same model with robust standard errors
+tab_model(model9_sg_wls, 
+          title = "Impact of Chinese Localisation on Sentiment Gap (Chinese vs English)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "City Builders & Economic Management",
+                         "Detective & Interactive Narrative",
+                         "Atmospheric Retro RPGs",
+                         "Turn-Based Tactical Party RPGs",
+                         "Couch Co-Op & Local Multiplayer",
+                         "Free-to-Play MMOs & Competitive",
+                         "Military Strategy & War Sims",
+                         "Family-Friendly Casual Games",
+                         "Skill-Based Action RPGs",
+                         "Immersive 3D Simulations & Driving",
+                         "Survival Horror & Dark Adventure",
+                         "Chaotic Top-Down Shooters",
+                         "Roguelike Deckbuilders",
+                         "Sci-Fi Space & Futuristic",
+                         "Comedy & Dark Humor"),
+          dv.labels = "WLS Regression with Robust Standard Error",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname",
+          vcov.fun = "vcovHC", 
+          vcov.args = list(type = "HC1"))
+
+
+```
+
+**Interpretation:**
+
+This model examines the relationship between Chinese localisation levels and the sentiment gap between Chinese and English players using weighted least squares (WLS) regression. The sentiment gap represents the difference between the Simplified Chinese positive review ratio and the English positive review ratio, where positive values indicate Chinese players rated the game more favorably than English-speaking players.
+
+Results indicate that the level of localisation does not have a significant effect on the emotional differences between local and foreign players. Using 'audio + text' (full localisation) as the baseline category, the coefficients for both 'no localization' and 'text-only' localisation levels are not significant, and the coefficients are close to zero. Notably, the 'text-only' localisation is relatively closer to the 95% confidence interval. This suggests that, compared to English players, Chinese players' satisfaction does not change significantly with localisation.
+
+However, when we shift our focus to the variable of the game's release year, we observe that players who leave reviews in Simplified Chinese express more negative sentiments towards games released in 2012, 2020, 2022, 2023, 2024, and 2025 compared to their English-speaking counterparts. The coefficients range from -0.04 to -0.12 and are statistically significant. In stark contrast, the genre of the game does not lead to noticeable changes in satisfaction levels among Chinese-speaking players; even when statistically significant, the magnitude of change is negligible. We might speculate that certain factors have caused Simplified Chinese-speaking players to become more discerning compared to their English-speaking counterparts in recent years.
+
+When comparing the standard WLS results with the robust standard error version, I observe several important differences:
+
+1. **Coefficient stability**: The coefficient estimates remain identical between both versions, confirming that robust standard errors affect only the precision estimates, not the effect sizes themselves.
+
+2. **Standard error differences**: The robust standard errors are generally larger than the conventional ones, particularly for the localisation variables. This reflects the heteroscedasticity in the data—the variability in sentiment gap likely differs across games with different characteristics.
+
+3. **Significance changes**: Although the standard errors are larger in the robust version, the two localisation levels of 'None' and 'text-only' remain insignificant, indicating that the localisation effect is robust and indeed has little association with the sentiment gap. However, some control variables that were significant in the conventional model lose their significance in the robust version, suggesting that their significant effects may have been overestimated due to the presence of heteroscedasticity; although the p-values for individual release years have increased and the alpha exceeds 0.05, they are still very close to the 95% confidence interval. This suggests that the year of game release remains a key driver of differences in the sentiment gap for SC players.
+
+4. **Inference implications**: The robust standard errors provide more conservative and reliable inference in the presence of heteroscedasticity, giving us greater confidence in the significant localisation effects while appropriately adjusting our confidence in the control variables.
+
+In the control variables, the logarithm of the total number of reviews is shown to be insignificant and uncorrelated with the sentiment gap in both models, indicating that games that are more popular globally do not necessarily receive relatively better ratings among Chinese players. Most game genre factors also show no significant correlation with the sentiment gap, suggesting that there is no marked difference in genre preferences between Chinese and English players.
+
+It can be said that Chinese localisation is not the primary factor contributing to changes in the sentiment gap. Some unknown systematic reasons have led to differences in sentiment gap between Simplified Chinese-speaking players and English-speaking players in recent years, which ultimately manifests through the year of game release as a mediator. What this unknown factor is still requires further investigation.
+
+
+## Hypothesis 1: Shrinking Localisation Effect Over Time
+
+### Chinese Review Ratio with Polynomial Time Trends
+
+```{r h1-review-ratio}
+# Table for the polynomial time interaction model for Chinese review ratio
+
+tab_model(model20, 
+          title = "Shrinking Localisation Effect Over Time (SC Review Ratio)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Release Year (centered)", 
+                         "Release Year² (centered)", 
+                         "Release Year³ (centered)",
+                         "Log Total Reviews",
+                         "City Builders & Economic Management",
+                         "Detective & Interactive Narrative",
+                         "Atmospheric Retro RPGs",
+                         "Turn-Based Tactical Party RPGs",
+                         "Couch Co-Op & Local Multiplayer",
+                         "Free-to-Play MMOs & Competitive",
+                         "Military Strategy & War Sims",
+                         "Casual Family-Friendly Games",
+                         "Skill-Based Action RPGs",
+                         "Immersive 3D Simulations & Driving",
+                         "Survival Horror & Dark Adventure",
+                         "Chaotic Top-Down Shooters",
+                         "Roguelike Deckbuilders",
+                         "Sci-Fi Space & Futuristic",
+                         "Comedy & Dark Humor",
+                         "Localisation: None × Year",
+                         "Localisation: Text Only × Year",
+                         "Localisation: None × Year²",
+                         "Localisation: Text Only × Year²",
+                         "Localisation: None × Year³",
+                         "Localisation: Text Only × Year³"),
+          dv.labels = "Simplified Chinese Review Ratio (Beta Regression)",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+```
+
+
+**Interpretation:**
+
+#### Main Localisation Effects at Mean Year
+
+This model examines Hypothesis 1, which proposes that the effect of Chinese localisation on game popularity (Chinese review ratio) has diminished over time as localisation becomes more common. Using a beta regression with polynomial time trends, I investigate how the relationship between localisation and Chinese player engagement has evolved from 2010 to 2025.
+
+Looking at the main effects for localisation levels at the mean centered year (approximately 2017-2018), I observe substantial differences between localisation levels:
+
+1. **No Localisation ("None"):** Games without any Chinese localisation show dramatically lower Chinese review ratios compared to fully localised games ("Audio + Text"), with an odds ratio of 0.26 (p < 0.001). This indicates that at the mean year, non-localised games have 74% lower odds of attracting Chinese players compared to fully localised games.
+
+2. **Text-Only Localisation:** Games with only text localisation (without Chinese audio) have moderately lower Chinese review ratios with an odds ratio of 0.80 (p < 0.001), representing a 20% reduction in the odds of attracting Chinese players compared to full localisation.
+
+These main effects are largely consistent with the basic model (model13), confirming the substantial impact of localisation on Chinese player engagement.
+
+#### Temporal Trends in Localisation Effects
+
+The critical findings for Hypothesis 1 come from the interactions between localisation levels and the polynomial year terms:
+
+1. **Linear Time Interactions**: 
+   - "Localisation: None × Year" has an odds ratio of 0.93 (p < 0.001)
+   - "Localisation: Text Only × Year" has an odds ratio of 0.95 (p = 0.002)
+   
+   Both interactions show significant negative coefficients (odds ratios less than 1). This indicates that, contrary to our hypothesis, the gap between non-localised/partially-localised and fully localised games has been **widening** over time in a linear fashion. The negative interaction coefficient means that with each passing year, the disadvantage of having no localisation or only text localisation has increased rather than decreased.
+   
+2. **Quadratic Time Interactions**:
+   - "Localisation: None × Year²" has an odds ratio of 1.01 (p = 0.008)
+   - "Localisation: Text Only × Year²" has an odds ratio of 1.00 (p = 0.099)
+   
+   The significant positive quadratic interaction for "None" localisation indicates a non-linear pattern in how the effect has changed over time. This suggests some moderation in the widening gap, but notably, this is only statistically significant for games with no localisation, there is no statistical evidence that "Text Only" games have the same effect.
+   
+3. **Cubic Time Interactions**:
+   - Neither cubic interaction term is statistically significant (p = 0.609 and p = 0.297)
+   
+   This suggests that while there are linear and some quadratic patterns in how localisation effects have evolved, the higher-order cubic patterns are not statistically meaningful.
+
+#### Comparison with Basic Model
+
+When comparing model20 (with polynomial time trends) to the basic model13, we see a significant improvement in model fit. The inclusion of these temporal interactions provides a more nuanced understanding of how localisation effects have changed over time.
+
+In the basic model, the main effects for localisation levels were likely averaged across all years, whereas model20 reveals the dynamic nature of these effects over time. The polynomial approach has successfully captured non-linear patterns in the temporal evolution of localisation effects.
+
+#### Conclusion on Hypothesis 1
+
+These findings largely **contradict Hypothesis 1**. Rather than observing a shrinking effect of localisation over time as hypothesised, I find that the importance of Chinese localisation for attracting Chinese players has generally **increased** over most of the study period. The linear interactions show a widening gap between localisation levels, while the quadratic interaction for "None" localisation suggests some moderation in this trend at certain points in time.
+
+Several factors might explain this counterintuitive finding:
+
+1. **Rising expectations**: As more games offer Chinese localisation, player expectations may have increased, making non-localised games stand out more negatively.
+
+2. **Market expansion**: The growth of the Chinese gaming market has likely brought in players with varying levels of English proficiency, potentially increasing the importance of native language support.
+
+3. **Competitive dynamics**: As the market has become more competitive, localisation quality may have become a more significant differentiating factor among games.
+
+### Sentiment Gap with Polynomial Time Trends
+
+```{r h1-sentiment-gap}
+# Table for the polynomial time interaction model for sentiment gap
+
+tab_model(model10_sg_poly_wls,
+          title = "Shrinking Localisation Effect Over Time (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Year (centered)", 
+                         "Year² (centered)", 
+                         "Year³ (centered)",
+                         "Log Total Reviews",
+                         "City Builders & Economic Management",
+                         "Detective & Interactive Narrative",
+                         "Atmospheric Retro RPGs",
+                         "Turn-Based Tactical Party RPGs",
+                         "Couch Co-Op & Local Multiplayer",
+                         "Free-to-Play MMOs & Competitive",
+                         "Military Strategy & War Sims",
+                         "Family-Friendly Casual Games",
+                         "Skill-Based Action RPGs",
+                         "Immersive 3D Simulations & Driving",
+                         "Survival Horror & Dark Adventure",
+                         "Chaotic Top-Down Shooters",
+                         "Roguelike Deckbuilders",
+                         "Sci-Fi Space & Futuristic",
+                         "Comedy & Dark Humor",
+                         "Localisation: None × Year",
+                         "Localisation: Text Only × Year",
+                         "Localisation: None × Year²",
+                         "Localisation: Text Only × Year²",
+                         "Localisation: None × Year³",
+                         "Localisation: Text Only × Year³"),
+          dv.labels = c("WLS Regression"),
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+
+# Same model with robust standard errors
+tab_model(model10_sg_poly_wls,
+          title = "Shrinking Localisation Effect Over Time (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Year (centered)", 
+                         "Year² (centered)", 
+                         "Year³ (centered)",
+                         "Log Total Reviews",
+                         "City Builders & Economic Management",
+                         "Detective & Interactive Narrative",
+                         "Atmospheric Retro RPGs",
+                         "Turn-Based Tactical Party RPGs",
+                         "Couch Co-Op & Local Multiplayer",
+                         "Free-to-Play MMOs & Competitive",
+                         "Military Strategy & War Sims",
+                         "Family-Friendly Casual Games",
+                         "Skill-Based Action RPGs",
+                         "Immersive 3D Simulations & Driving",
+                         "Survival Horror & Dark Adventure",
+                         "Chaotic Top-Down Shooters",
+                         "Roguelike Deckbuilders",
+                         "Sci-Fi Space & Futuristic",
+                         "Comedy & Dark Humor",
+                         "Localisation: None × Year",
+                         "Localisation: Text Only × Year",
+                         "Localisation: None × Year²",
+                         "Localisation: Text Only × Year²",
+                         "Localisation: None × Year³",
+                         "Localisation: Text Only × Year³"),
+          dv.labels = c("WLS Regression with Robust Standard Error"),
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname",
+          vcov.fun = "vcovHC", 
+          vcov.args = list(type = "HC1"))
+```
+
+
+**Interpretation:**
+
+#### Main Localisation Effects at Mean Year
+
+The main effects for localisation levels reveal interesting patterns at the mean centered year (approximately 2017-2018):
+
+- **No Localisation ("None")**: In the standard model, games without Chinese localisation show a small but significant negative sentiment gap compared to fully localised games, with a coefficient of -0.01 (p = 0.018). However, in the robust standard error model, this effect is not statistically significant (p = 0.377), suggesting that the effect is not robust when accounting for heteroscedasticity.
+
+- **Text-Only Localisation**: Games with only text localisation (without Chinese audio) display a more substantial negative sentiment gap with a coefficient of -0.03 (p < 0.001) in the standard model. This effect remains marginally significant in the robust model (p = 0.051), suggesting a somewhat more reliable finding that text-only localisation is associated with lower relative satisfaction among Chinese players compared to full localisation.
+
+The discrepancy between the standard and robust models highlights the importance of accounting for heteroscedasticity in the data, as the robust standard errors are generally larger, affecting the statistical significance of the findings.
+
+#### Temporal Trends in Localisation Effects
+
+The critical findings for Hypothesis 1 come from the interactions between localisation levels and the polynomial year terms:
+
+1. **Linear Time Interactions**: 
+   - "Localisation: None × Year" has a positive coefficient of 0.01 (p < 0.001 in standard model, p = 0.009 in robust model)
+   - "Localisation: Text Only × Year" has a positive coefficient of 0.01 (p < 0.001 in standard model, but p = 0.144 in robust model)
+   
+   These results indicate that, for games with no localisation, the sentiment gap has been **narrowing** over time in a linear fashion, as evidenced by the positive interaction coefficient that remains significant even with robust standard errors. For text-only localisation, there is a similar positive trend in the standard model, but this effect becomes non-significant in the robust model, suggesting less confidence in this temporal pattern.
+
+2. **Quadratic Time Interactions**:
+   - "Localisation: None × Year²" has a coefficient of 0.00 (p < 0.001 in standard model, but p = 0.318 in robust model)
+   - "Localisation: Text Only × Year²" has a coefficient of 0.00 (p < 0.001 in standard model, but p = 0.274 in robust model)
+   
+   The quadratic interactions, while significant in the standard model, lose significance in the robust model. This suggests that the curvature in the temporal pattern is less reliable when accounting for heteroscedasticity.
+
+3. **Cubic Time Interactions**:
+   - Neither cubic interaction term is statistically significant in the robust model (p = 0.741 and p = 0.899)
+   
+   This indicates that higher-order polynomial terms add little explanatory power to the model, particularly when using robust standard errors.
+   
+#### Comparison with Standard and Robust Models
+
+When comparing the standard WLS estimates with their robust standard error counterparts, several important patterns emerge:
+
+1. **Coefficient stability**: The point estimates remain identical between standard and robust models, as expected since robust standard errors affect precision estimates but not coefficient magnitudes.
+
+2. **Standard error changes**: The robust standard errors are generally larger, particularly for the localisation main effects and their interactions with time variables. For example, the standard error for "None" localisation increases from 0.01 to 0.02, reflecting heteroscedasticity in the data.
+
+3. **Significance changes**: Many terms that are significant in the standard model lose significance in the robust model. Notably, the main effect for "None" localisation becomes non-significant, and most of the polynomial interaction terms also lose significance. The only interaction that remains clearly significant in the robust model is the linear interaction for "None" localisation.
+
+4. **Model fit**: Despite these changes in significance, the overall model fit remains the same with an R-Square of 0.224, indicating that approximately 22.4% of the variance in sentiment gap is explained by the model.
+
+#### Conclusion on Hypothesis 1
+
+These findings present a nuanced picture regarding Hypothesis 1. For games with no localisation, there is strong evidence that the sentiment gap has been narrowing over time, which **supports Hypothesis 1**. The positive coefficient for the "None × Year" interaction (0.01, p = 0.009 in the robust model) indicates that Chinese players have become relatively less negative about non-localised games compared to English players over time.
+
+However, for games with text-only localisation, the evidence is less clear. While the standard model suggests a similar narrowing trend, this effect is not significant in the robust model, indicating that we cannot reliably conclude that the sentiment gap for partially localised games has changed over time.
+
+This pattern differs somewhat from what we observed in the Chinese Review Ratio analysis (model20), where localisation effects were generally found to be increasing rather than decreasing over time. This divergence suggests that the impact of localisation may manifest differently in different aspects of game popularity:
+
+1. **Player Base Composition** (Chinese Review Ratio): Localisation has become increasingly important for attracting Chinese players to games, with the gap between localised and non-localised games widening over time.
+
+2. **Relative Player Satisfaction** (Sentiment Gap): Chinese players' relative dissatisfaction with non-localised games (compared to English players) has decreased over time, suggesting possibly increasing tolerance for lack of localisation in terms of sentiment, even as localisation continues to affect whether Chinese players engage with the game at all.
+
+Several factors might explain these seemingly contradictory findings:
+
+1. **Selection effects**: The players who choose to play non-localised games despite the language barrier may be a more selective group with higher foreign language proficiency and consequently more positive attitudes toward these games.In the absence of a Chinese localisation, most Chinese players are more likely to refrain from playing the game, and therefore would not leave a review.
+
+2. **Changing expectations**: While more Chinese players may expect localisation (affecting the Chinese review ratio), those who do play non-localised games may have adjusted their expectations over time.
+
+3. **Market segmentation**: The Chinese gaming market may have become more segmented over time, with different groups of players having different preferences and expectations regarding localisation.
+
+The practical implications for game developers and publishers are complex. While investing in Chinese localisation remains crucial for maximising a game's reach in the Chinese market (as shown by the Chinese review ratio analysis), the narrowing sentiment gap for non-localised games suggests that for certain segments of the Chinese market, lack of localisation may be becoming less of a barrier to player satisfaction. However, this should be interpreted cautiously, as the main effect of localisation on sentiment gap remains negative, indicating that, on average, Chinese players still respond more positively to localised games than non-localised ones.
+
+In conclusion, the sentiment gap analysis provides partial support for Hypothesis 1, showing that the effect of localisation on relative Chinese player satisfaction has diminished over time for games with no localisation, while the evidence for text-only localisation is inconclusive. This finding adds important nuance to our understanding of how localisation effects have evolved in the Chinese gaming market.
+
+## Hypothesis 2: Text-Intensive Games
+
+### Chinese Review Ratio with Text-Heavy Game Interaction
+
+```{r h2-review-ratio}
+# Table for the text-heavy interaction model for Chinese review ratio
+
+tab_model(model16_simple, 
+          title = "Localisation Effect for Text-Heavy vs. Other Games (Chinese Review Ratio)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Text-Heavy Game (Yes)",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Localisation: None × Text-Heavy Game",
+                         "Localisation: Text Only × Text-Heavy Game"),
+          dv.labels = "Simplified Chinese Review Ratio (Beta Regression)",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+
+```
+
+
+**Interpretation:**
+
+This model tests Hypothesis 2, which proposes that the effect of Chinese localisation on game popularity (Simplified Chinese review ratio) is stronger for text-intensive games than for other games. Using a beta regression with an interaction term between localisation level and text-heavy status, I investigate whether games with substantial textual content (tagged as "Story Rich" or "Visual Novel") show a differential response to localisation compared to less text-dependent games. Tag factors are remove after VIF and R-Square comparison.
+
+#### Main Effects
+
+The main effects for localisation levels reveal substantial differences at baseline (for non-text-heavy games):
+
+- **No Localisation ("None")**: Games without any Chinese localisation show dramatically lower Chinese review ratios compared to fully localised games ("Audio + Text"), with an odds ratio of 0.36 (p < 0.001). This indicates that non-text-heavy games without localisation have 64% lower odds of attracting Chinese players compared to fully localised non-text-heavy games.
+
+- **Text-Only Localisation**: Games with only text localisation (without Chinese audio) have an odds ratio of 0.97 (p = 0.309), which is not statistically significant. This suggests that for non-text-heavy games, having only text localisation results in Chinese player engagement that is not significantly different from having full localisation.
+
+- **Text-Heavy Game**: The main effect for text-heavy games is strongly significant with an odds ratio of 2.02 (p < 0.001). This indicates that among fully localised games (the reference category), text-heavy games have approximately 102% higher odds of attracting Chinese players compared to non-text-heavy games. This is a substantial effect, suggesting that Chinese players show particular interest in fully localised text-heavy games.
+
+#### Interaction Effects
+
+The critical findings for Hypothesis 2 come from the interactions between localisation levels and text-heavy status:
+
+- **No Localisation × Text-Heavy**: This interaction shows a significant negative coefficient (OR = 0.51, p < 0.001). This indicates that the negative effect of having no localisation is amplified for text-heavy games. Calculating the combined effect for text-heavy games with no localisation (0.36 × 0.51 = 0.18), such games have approximately 82% lower odds of attracting Chinese players compared to fully localised text-heavy games, a substantially larger gap than the 64% reduction for non-text-heavy games.
+
+- **Text-Only × Text-Heavy**: This interaction also shows a significant negative coefficient (OR = 0.72, p < 0.001). For text-heavy games, having only text localisation without audio is significantly more detrimental than for non-text-heavy games. The combined effect (0.97 × 0.72 = 0.70) indicates that text-heavy games with only text localisation have about 30% lower odds of attracting Chinese players compared to fully localised text-heavy games. This is noteworthy because text-only localisation was not significantly different from full localisation for non-text-heavy games, but becomes significant when the game is text-heavy.
+
+#### Comparison with Previous Models
+
+Comparing these results with the base model (model13) discussed earlier, we see important differences:
+
+1. **Effect Magnitude**: In the base model, games with no localisation had an odds ratio of 0.27, while in this interaction model, non-text-heavy games with no localisation have an odds ratio of 0.36. This suggests that the previous model may have overestimated the negative impact of no localisation for non-text-heavy games while underestimating it for text-heavy games (where the effective odds ratio is 0.18).
+
+2. **Text-Only Localisation**: The base model showed an odds ratio of 0.82 for text-only localisation, while this interaction model shows no significant difference between text-only and full localisation for non-text-heavy games (OR = 0.97, p = 0.309). However, for text-heavy games, text-only localisation has a significant negative effect (combined OR = 0.70). This reveals that the previous model's significant negative effect for text-only localisation was likely driven primarily by text-heavy games.
+
+3. **Model Fit**: This interaction model has a higher R² (0.300) compared to the base model, indicating that accounting for the differential effect of localisation based on text intensity improves our ability to explain variation in Chinese player engagement.
+
+#### Support for Hypothesis 2
+
+These findings strongly support Hypothesis 2. The negative impact of incomplete localisation is indeed significantly stronger for text-heavy games than for less text-dependent games. Specifically:
+
+1. For games with no localisation, the odds reduction is 64% for non-text-heavy games but 82% for text-heavy games.
+
+2. For games with text-only localisation, there is no significant reduction for non-text-heavy games but a 30% reduction for text-heavy games.
+
+This pattern makes intuitive sense—games that rely heavily on narrative, dialogue, and textual elements are more dependent on effective localisation to be accessible and appealing to players with different language backgrounds.
+
+### Sentiment Gap with Text-Heavy Game Interaction
+
+```{r h2-sentiment-gap}
+# Table for the text-heavy interaction model for sentiment gap
+
+tab_model(model11_sg_wls,
+          title = "Localisation Effect for Text-Heavy vs. Other Games (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only", 
+                         "Text-Heavy Game (Yes)",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Text Only × Text-Heavy",
+                         "None × Text-Heavy"),
+          dv.labels = "WLS Regression",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+
+# Same model with robust standard errors
+tab_model(model11_sg_wls,
+          title = "Localisation Effect for Text-Heavy vs. Other Games (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only", 
+                         "Text-Heavy Game (Yes)",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Text Only × Text-Heavy",
+                         "None × Text-Heavy"),
+          dv.labels = "WLS Regression",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname",
+          vcov.fun = "vcovHC", 
+          vcov.args = list(type = "HC1"))
+```
+
+
+**Interpretation:**
+
+#### Main Effects in Standard WLS Regression
+
+The main effects for localisation levels and text-heavy status reveal interesting patterns:
+
+- **No Localisation ("None")**: Games without any Chinese localisation show a small but significant positive sentiment gap (coefficient = 0.02, p < 0.001) compared to fully localised games. This suggests that, contrary to expectations, non-localised games are rated somewhat more positively by Chinese players relative to English players, compared to fully localised games.
+
+- **Text-Only Localisation**: Games with only text localisation (without Chinese audio) also display a significant positive effect (coefficient = 0.02, p < 0.001). Again, this indicates that partially localised games receive relatively more positive ratings from Chinese players compared to English players, relative to fully localised games.
+
+- **Text-Heavy Game**: The main effect for text-heavy games is strongly significant with a coefficient of 0.06 (p < 0.001). This indicates that among fully localised games (the reference category), text-heavy games have a more positive sentiment gap—Chinese players rate these games more favorably relative to English players.
+
+#### Interaction Effects in Standard WLS Regression
+
+- **Text-Only × Text-Heavy**: This interaction shows a significant negative coefficient (-0.05, p < 0.001). This indicates that while text-only localisation generally has a positive effect on sentiment gap for non-text-heavy games, this effect is substantially reduced with text-only localisation. The combined effect (0.02 + 0.06 - 0.05 = 0.03) suggests only a minor positive sentiment gap remains for text-heavy games with text-only localisation.
+
+- **None × Text-Heavy**: This interaction also shows a significant negative coefficient (-0.03, p < 0.001). This suggests that the positive effect of no localisation on sentiment gap is reduced for text-heavy games. The combined effect (0.02 + 0.06 - 0.03 = 0.05) indicates that text-heavy games with no localisation still maintain a positive sentiment gap, but less than would be expected from the individual main effects alone.
+
+#### Robust Standard Error Findings
+
+When robust standard errors are applied to account for heteroscedasticity, the significance of several effects changes substantially:
+
+- The main effects for localisation ("None" and "Text Only") become non-significant (p = 0.518 and p = 0.371 respectively).
+- The main effect for text-heavy games becomes borderline significant (p = 0.050).
+- Both interaction terms become non-significant (p = 0.142 and p = 0.351).
+
+This change in significance between the standard and robust models suggests that the apparent relationships might be influenced by heteroscedasticity or outliers in the data. The robust standard errors are larger than the conventional ones, reflecting greater variability in the data than the standard model accounts for.
+
+#### Comparison with Previous Models
+
+The findings from this sentiment gap model present a stark contrast to the Chinese review ratio model (model16_simple) discussed earlier:
+
+1. **Direction of Localisation Effects**: In the review ratio model, lack of localisation had a strong negative effect on Chinese player engagement. In contrast, the sentiment gap model shows a small positive effect of non-localisation on relative sentiment (in the standard model), which becomes non-significant with robust standard errors.
+
+2. **Interaction Patterns**: While both models show significant interaction effects in their standard versions, the interaction effects in the sentiment gap model become non-significant with robust standard errors. This contrasts with the review ratio model, where the interactions remained strongly significant.
+
+3. **Explanation Power**: The sentiment gap model has a notably lower R² (0.183) compared to the review ratio model (0.300), suggesting that localisation and text-heaviness explain less of the variation in sentiment gap than they do for review ratio.
+
+4. **Sample Size**: The sentiment gap model uses a smaller sample (7,278 observations), games with less than 20 SC and English review are excluded, compared to the review ratio model (14,187 observations), which might affect the stability of the estimates.
+
+#### Substantive Interpretation
+
+These findings present a nuanced picture regarding Hypothesis 2 when considering sentiment gap:
+
+1. **Selection Effect**: The positive (or non-significant) effect of no localisation on sentiment gap, despite its negative effect on Chinese review ratio, suggests a selection effect. Chinese players who choose to play non-localised games despite the language barrier may have different expectations or language abilities, leading to relatively more positive reviews when they do play these games.
+
+2. **Text-Heavy Games Distinction**: The positive main effect for text-heavy games (though only borderline significant with robust standard errors) suggests that Chinese players who engage with text-heavy content may have particular appreciation for these games relative to English players.
+
+3. **Weak Support for Hypothesis 2**: When using robust standard errors, the lack of significant interaction effects provides limited support for Hypothesis 2 in terms of sentiment gap. While localisation clearly affects *whether* Chinese players engage with games differently based on text intensity (as shown in the review ratio model), it has a less clear effect on *how* they rate games relative to English players.
+
+## Hypothesis 3: Price and Indie Game Effects
+
+### Price Category Distribution Table for CNY and USD
+```{r price-distribution}
+# Table for USD price categories distribution
+price_usd_table <- table(steam_data_fa$price_usd_category, useNA = "ifany")
+price_usd_df <- data.frame(
+  Category = names(price_usd_table),
+  Count = as.numeric(price_usd_table),
+  Percentage = round(100 * as.numeric(price_usd_table) / sum(price_usd_table, na.rm = TRUE), 2)
+)
+
+# Handle potential NA in category names
+if(any(is.na(price_usd_df$Category))) {
+  price_usd_df$Category[is.na(price_usd_df$Category)] <- "Missing"
+}
+
+# Table for CNY price categories distribution
+price_cny_table <- table(steam_data_fa$price_cny_category, useNA = "ifany")
+price_cny_df <- data.frame(
+  Category = names(price_cny_table),
+  Count = as.numeric(price_cny_table),
+  Percentage = round(100 * as.numeric(price_cny_table) / sum(price_cny_table, na.rm = TRUE), 2)
+)
+
+# Handle potential NA in category names
+if(any(is.na(price_cny_df$Category))) {
+  price_cny_df$Category[is.na(price_cny_df$Category)] <- "Missing"
+}
+
+# Display the USD price distribution table
+kable(price_usd_df, 
+      caption = "Distribution of Games by USD Price Category",
+      col.names = c("Price Category", "Count", "Percentage (%)"),
+      align = c("l", "r", "r"))
+
+# Display the CNY price distribution table
+kable(price_cny_df, 
+      caption = "Distribution of Games by CNY Price Category",
+      col.names = c("Price Category", "Count", "Percentage (%)"),
+      align = c("l", "r", "r"))
+```
+
+I have implement market-based price tiers that better reflect the actual gaming industry segments rather than relying on quartiles. I've created five meaningful categories:
+
+Free: Games that cost nothing
+Budget/Indie: Lower-priced games (≤10 USD/≤50 CNY)
+Mid-tier: Middle range games (≤30 USD/≤120 CNY)
+Major Release: Significant titles but not top tier (≤50 USD/≤200 CNY)
+Premium AAA: High-end games (>50 USD/>200 CNY)
+
+I've observed an interesting discrepancy in my data regarding missing price values: 1037 NA values (7.31%) for CNY pricing compared to only 142 NA values (1%) for USD pricing. This substantial difference warrants investigation, as it may reveal important patterns in global game distribution strategies.
+
+#### Potential Reasons for the CNY-USD Price Gap
+
+I believe this gap can be attributed to several primary factors:
+
+1. **Content-Based Regional Restrictions**:
+The higher proportion of missing CNY prices likely represents games that are intentionally not made available in the Chinese market. While Steam operates in China without going through the official government approval process (unlike domestic platforms), publishers and Steam itself still make strategic decisions about regional availability. Games containing sensitive content (political themes, excessive violence, certain historical depictions) or adult content (R18+) are often withheld from the Chinese market to avoid potential regulatory complications.
+
+2. **Publisher-Specific Regional Lockouts**:
+Some publishers like KONAMI have historically implemented region locks for mainland China. This practice extends beyond KONAMI to other publishers who may choose to restrict access to their entire catalog or specific titles in the Chinese market for various business or regulatory reasons, for example, Activision only made their globally popular title Call of Duty series available on Mainland China Steam Store several years ago. These region-locked games would appear in the global Steam database but intentionally lack CNY pricing, showing NA in our database.
+
+3. **Grey Regulatory Status of Steam in China**:
+The ambiguous regulatory position of Steam in mainland China creates a cautious environment for some publishers. While the international Steam client remains accessible in China (with occasional interruptions), it operates in a regulatory grey area. Some publishers may deliberately omit CNY pricing to maintain a lower profile in this market while still technically allowing access to their games through foreign purchases or activation by CDKeys.
+
+#### Games with No Price (Unpurchaseable)
+
+For games that appear completely unpurchaseable (NA in both currencies), I can identify several potential explanations:
+
+1. **Delisted Games**:  Titles that have been removed from sale but remain in the database for owners who previously purchased them.
+2. **Pre-release Entries**: Games that have store pages created in preparation for future release but aren't yet available for purchase.
+3. **Technical Issues**: Games temporarily unavailable due to technical problems or store issues during data collection.
+
+This differential pattern of missing price data between currencies provides valuable context for interpreting our regression models, particularly when examining the interaction between price categories and localisation effects. It suggests that regional availability itself may be an important factor in understanding game distribution patterns on Steam.
+
+### Chinese Review Ratio with Indie Game Interaction
+
+```{r h3-indie-review-ratio}
+# Table for the indie game interaction model for Chinese review ratio
+
+tab_model(model17_simple, 
+          title = "Localisation Effect for Indie vs. Non-Indie Games (Chinese Review Ratio)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Indie Game (Yes)",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Localisation: None × Indie Game",
+                         "Localisation: Text Only × Indie Game"),
+          dv.labels = "Simplified Chinese Review Ratio (Beta Regression)",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+```
+
+
+**Interpretation:**
+
+#### Main Effects
+
+The main effects for localisation levels and indie status reveal notable patterns when examining non-indie games (the baseline for the indie interaction):
+
+The absence of Chinese localisation ("None") dramatically reduces Chinese player engagement for non-indie games, with an odds ratio of 0.32 (p < 0.001). This represents approximately 68% lower odds of attracting Chinese players compared to fully localised non-indie games and stands as one of the strongest effects in the model, highlighting the critical importance of localisation for non-indie titles.
+
+Among fully localised games (the reference category), indie game status shows a substantial positive effect (OR = 1.28, p < 0.001), indicating that indie games have 28% higher odds of attracting Chinese players compared to non-indie games when language barriers are removed. This suggests Chinese players show particular interest in indie content when properly localised.
+
+The log-transformed total reviews variable shows a modest but significant positive relationship (OR = 1.01, p = 0.016), suggesting that more globally popular games tend to have slightly higher proportions of Chinese players. Though statistically significant, the magnitude of this effect is quite small compared to the influences of localisation and indie status, likely reflecting broader marketing reach or network effects for popular titles.
+
+#### Interaction Effects
+
+The interaction between no localisation and indie game status reveals a significant negative effect (OR = 0.80, p < 0.001), indicating that the effect of having no localisation differs between indie and non-indie games. The direction is crucial: the OR of 0.80 means that for indie games, the negative effect of having no localisation is multiplicatively compounded. Calculating the combined effect for indie games with no localisation (0.32 × 0.80 = 0.26) reveals a 74% reduction in odds compared to fully localised indie games.
+
+Similarly, the text-only localisation and indie game interaction shows a significant negative coefficient (OR = 0.79, p < 0.001), demonstrating that the effect of partial localisation differs substantially between game types. The combined effect for indie games with text-only localisation (0.96 × 0.79 = 0.76) represents a 24% reduction in odds compared to fully localised indie games. I am very surprised by this difference between text-only localisation and full localisation, as the majority of games, including indie games, do not offer audio support for multiple languages.
+
+#### Non-Significant Variables
+
+For non-indie games, having only text localisation without Chinese audio (OR = 0.96, p = 0.318) yields Chinese player engagement that is not significantly different from having full localisation. This non-significance is revealing when contrasted with the significant negative interaction with indie status, suggesting that text-only localisation is adequate for non-indie games but inadequate for indie games.
+
+None of the release year coefficients reached statistical significance (all p > 0.05), indicating that after controlling for indie status and localisation, temporal trends do not significantly affect the Chinese review ratio. This contrasts with other models where release year showed significant effects, suggesting that indie status might capture some of the temporal patterns in the data.
+
+#### Patterns and Insights
+
+1. **Differential Localisation Effects**
+
+The model reveals a striking pattern: the effect of localisation differs systematically between indie and non-indie games, but not in the direction one might expect. For non-indie games, no localisation reduces Chinese player engagement by 68% (OR = 0.32), while text-only localisation has no significant effect compared to full localisation (OR = 0.96, p = 0.318). In contrast, for indie games, no localisation reduces engagement by 74% (combined OR = 0.26), and text-only localisation reduces engagement by 24% (combined OR = 0.76). This could suggests that Chinese players have higher expectations for localisation quality in indie games than in non-indie games, particularly regarding audio localisation.
+
+2. **Indie Preference with Full Localisation**
+
+When games are fully localised, Chinese players show a clear preference for indie games (OR = 1.28, p < 0.001). This 28% higher engagement with indie games suggests that when language barriers are removed, Chinese players are particularly drawn to indie titles. This preference might reflect different genre compositions among indie games, potentially lower prices for indie titles, unique gameplay mechanics or artistic styles common in the indie segment, or community-driven interest in independent game development.
+
+3. **Text-Only Localisation Sufficiency Differs**
+
+For non-indie games, text-only localisation appears sufficient (no significant difference from full localisation), while for indie games, the absence of Chinese audio significantly reduces engagement. This need to go through further investigation.
+
+#### Comparison with Other Models
+
+Comparing these findings with related models reveals important patterns across the study. The basic localisation model (model13) showed an overall negative effect for text-only localisation (OR = 0.82), but the current model reveals this effect was likely driven primarily by indie games, as non-indie games show no significant effect of text-only localisation. The differential effects between game types were masked in the simpler model without interaction terms.
+
+When compared to the text-heavy interaction model (model16_simple), both models show significant interaction effects, indicating that the impact of localisation varies across game categories. Text-heavy games showed a stronger negative effect of no localisation (OR = 0.51 interaction) compared to the indie interaction (OR = 0.80), suggesting that text intensity might be a stronger moderator of localisation effects than indie status.
+
+In relation to the price interaction models (models 18 & 19), the price models showed that budget/indie-priced games with no localisation had combined odds ratios around 0.22-0.24, which aligns remarkably with the indie tag model's combined OR of 0.26 for non-localised indie games. This consistency suggests that both indie tagging and budget pricing are capturing similar market segments with comparable localisation sensitivities.
+
+#### Support for Hypothesis 3
+These findings provide limited support for Hypothesis 3, but not in the direction initially hypothesised. The significant interaction terms indicate that the effect of localisation differs between indie and non-indie games, but the combined effects suggest that indie games might actually suffer more severely from incomplete localisation than non-indie games:
+
+1. For games with no localisation, the combined odds ratio for indie games (0.26) is lower than for non-indie games (0.32), suggesting a more severe penalty for lacking localisation.
+
+2. For games with text-only localisation, non-indie games show no significant difference from full localisation (p = 0.318), but the significant interaction term indicates that the effect differs significantly for indie games, with the combined effect (0.76) suggesting a negative impact compared to full localisation.
+
+These patterns contradict the hypothesis that players would be more tolerant of lack of localisation for indie games. Instead, they suggest that Chinese players might actually have higher expectations for localisation in indie games, potentially due to different genre characteristics, narrative focus, or other factors that make localisation particularly important for the indie game experience.
+
+Several factors might explain these patterns:
+
+1. **Different Expectations**: Players may approach indie games with different expectations regarding production values and localisation quality compared to non-indie titles.
+
+2. **Community Localisation**: As mentioned in the discussion section of the document, indie games with passionate communities may benefit from high-quality fan translations ("汉化", hànhuà), partially mitigating the negative impact of lacking official localisation.
+
+3. **Game Complexity**: Indie games might generally have less complex narratives or dialogue compared to major commercial titles, potentially making the absence of localisation less detrimental to the overall experience.
+
+4. **Selection Effects**: Players who choose indie games might, on average, have different characteristics (such as higher English proficiency or greater tolerance for language barriers) compared to players of mainstream non-indie titles.
+
+5. **Audio Importance in Indie Games**: The significant negative interaction for text-only localisation in indie games suggests that when indie games do include substantial voiced content, Chinese audio becomes particularly important for Chinese player engagement.
+
+### Chinese Review Ratio with Price Category Interactions (USD and CNY)
+
+```{r h3-price-usd-review-ratio}
+# Table for the USD price interaction model for Chinese review ratio
+
+tab_model(model18, 
+          title = "Localisation Effect by USD Price Category (Chinese Review Ratio)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Price: Budget/Indie", 
+                         "Price: Mid-tier", 
+                         "Price: Major Release", 
+                         "Price: AAA",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "City Builders & Economic Management",
+                         "Detective & Interactive Narrative",
+                         "Atmospheric Retro RPGs",
+                         "Turn-Based Tactical Party RPGs",
+                         "Couch Co-Op & Local Multiplayer",
+                         "Free-to-Play MMOs & Competitive",
+                         "Military Strategy & War Sims",
+                         "Casual Family-Friendly Games",
+                         "Skill-Based Action RPGs",
+                         "Immersive 3D Simulations & Driving",
+                         "Survival Horror & Dark Adventure",
+                         "Chaotic Top-Down Shooters",
+                         "Roguelike Deckbuilders",
+                         "Sci-Fi Space & Futuristic",
+                         "Comedy & Dark Humor",
+                         "Localisation: None × Budget/Indie",
+                         "Localisation: Text Only × Budget/Indie",
+                         "Localisation: None × Mid-tier",
+                         "Localisation: Text Only × Mid-tier",
+                         "Localisation: None × Major Release",
+                         "Localisation: Text Only × Major Release",
+                         "Localisation: None × AAA",
+                         "Localisation: Text Only × AAA"),
+          dv.labels = "Simplified Chinese Review Ratio (Beta Regression)",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+```
+
+
+```{r h3-price-cny-review-ratio}
+# Table for the CNY price interaction model for Chinese review ratio
+
+tab_model(model19, 
+          title = "Localisation Effect by CNY Price Category (Chinese Review Ratio)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Price: Budget/Indie", 
+                         "Price: Mid-tier", 
+                         "Price: Major Release", 
+                         "Price: AAA",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "City Builders & Economic Management",
+                         "Detective & Interactive Narrative",
+                         "Atmospheric Retro RPGs",
+                         "Turn-Based Tactical Party RPGs",
+                         "Couch Co-Op & Local Multiplayer",
+                         "Free-to-Play MMOs & Competitive",
+                         "Military Strategy & War Sims",
+                         "Casual Family-Friendly Games",
+                         "Skill-Based Action RPGs",
+                         "Immersive 3D Simulations & Driving",
+                         "Survival Horror & Dark Adventure",
+                         "Chaotic Top-Down Shooters",
+                         "Roguelike Deckbuilders",
+                         "Sci-Fi Space & Futuristic",
+                         "Comedy & Dark Humor",
+                         "Localisation: None × Budget/Indie",
+                         "Localisation: Text Only × Budget/Indie",
+                         "Localisation: None × Mid-tier",
+                         "Localisation: Text Only × Mid-tier",
+                         "Localisation: None × Major Release",
+                         "Localisation: Text Only × Major Release",
+                         "Localisation: None × AAA",
+                         "Localisation: Text Only × AAA"),
+          dv.labels = "Simplified Chinese Review Ratio (Beta Regression)",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+```
+
+
+**Interpretation:**
+
+#### Main Effects
+
+- **No Localisation ("None")**: For free games (the reference category), lacking Chinese localisation dramatically reduces Chinese player engagement with an odds ratio of 0.48 (p < 0.001). This represents approximately 52% lower odds of attracting Chinese players compared to fully localised free games.
+
+- **Text-Only Localisation**: For free games, having text localisation without Chinese audio shows a positive coefficient (OR = 1.30, p = 0.148). While not statistically significant, this suggests that for free games, text-only localisation may not differ substantially from full localisation in terms of attracting Chinese players.
+
+- **Budget/Indie Price** (≤50 CNY): A strong positive effect with an odds ratio of 2.10 (p < 0.001), indicating that budget/indie fully localised games have 110% higher odds of attracting Chinese players compared to fully localised free games. This robust positive effect directly contradicts any assumption that budget/indie games have inherently lower appeal to Chinese players.
+
+- **Mid-tier Price** (≤120 CNY): A marginally significant positive effect with an odds ratio of 1.33 (p = 0.062), suggesting about 33% higher odds of attracting Chinese players compared to free games when fully localised.
+
+#### Interaction Effects
+
+The most illuminating findings come from examining significant interaction terms:
+
+- **No Localisation × Budget/Indie**: Strong negative interaction (OR = 0.46, p < 0.001)
+- **Text-Only × Budget/Indie**: Significant negative interaction (OR = 0.58, p = 0.003)
+- **No Localisation × Mid-tier**: Significant negative interaction (OR = 0.65, p = 0.012)
+- **Text-Only × Mid-tier**: Significant negative interaction (OR = 0.66, p = 0.029)
+
+These significant interaction terms demonstrate that the impact of localisation differs substantially across price categories, with budget/indie and mid-tier games showing significantly different responses to localisation compared to free games.
+
+#### Genre Factors: Chinese Players' Preferences
+
+Several genre factors show highly significant relationships with Chinese review ratio:
+
+- **Strongest Positive Associations**:
+  - Chaotic Top-Down Shooters (OR = 1.04, p < 0.001)
+  - Sci-Fi Space & Futuristic (OR = 1.04, p < 0.001)
+  - Turn-Based Tactical Party RPGs (OR = 1.03, p < 0.001)
+  - Couch Co-Op & Local Multiplayer (OR = 1.03, p < 0.001)
+  - City Builders & Economic Management (OR = 1.03, p < 0.001)
+
+- **Strongest Negative Associations**:
+  - Atmospheric Retro RPGs (OR = 0.83, p < 0.001) - the most negative association
+  - Immersive 3D Simulations & Driving (OR = 0.94, p < 0.001)
+  - Survival Horror & Dark Adventure (OR = 0.95, p < 0.001)
+  - Comedy & Dark Humor (OR = 0.95, p < 0.001)
+
+These genre associations reveal clear preferences among Chinese players, with particular engagement in strategy, sci-fi, tactical, and cooperative games, while showing less relative interest in retro RPGs, simulation, and comedy games.
+
+#### Overall Popularity Effect
+
+- **Log Total Reviews**: Significant positive relationship (OR = 1.06, p < 0.001), indicating that more globally popular games tend to have higher proportions of Chinese players. This likely reflects greater marketing reach, visibility, or network effects.
+
+#### Contrasting with Non-Significant Variables
+
+Several variables show no statistically significant relationship with Chinese review ratio:
+
+- **Higher Price Categories**: Neither Major Release (OR = 0.98, p = 0.904) nor AAA (OR = 1.19, p = 0.377) price categories differ significantly from free games in terms of Chinese player engagement when fully localised.
+
+- **Interactions for Higher Price Categories**: None of the interactions between localisation level and higher price categories (Major Release, AAA) reach statistical significance. This suggests that the differential effect of localisation observed in lower price tiers does not extend to premium games.
+
+- **Release Year**: None of the release year coefficients are statistically significant, indicating that after controlling for price and localisation, temporal factors do not significantly influence Chinese player engagement.
+
+- **Some Genre Factors**: Roguelike Deckbuilders (p = 0.162) shows no significant association with Chinese review ratio, suggesting neither particular affinity nor aversion among Chinese players for this genre.
+
+- **Log Total Reviews**: Significant positive relationship (OR = 1.06, p < 0.001), indicating that more globally popular games tend to have higher proportions of Chinese players. This likely reflects greater marketing reach, visibility, or network effects.
+
+#### Patterns and Insights: Combined Effects Analysis
+
+To understand the full impact of localisation across price categories, I calculate the combined effects for each price category and localisation level:
+
+1. For No Localisation:
+- Free: OR = 0.48
+- Budget/Indie: 0.48 × 0.46 = 0.22 (78% reduction in odds)
+- Mid-tier: 0.48 × 0.65 = 0.31 (69% reduction in odds)
+- Major Release: 0.48 × 1.08 = 0.52 (48% reduction, interaction not significant)
+- AAA: 0.48 × 0.78 = 0.37 (63% reduction, interaction not significant)
+
+2. For Text-Only Localisation:
+- Free: OR = 1.30 (not significant)
+- Budget/Indie: 1.30 × 0.58 = 0.75 (25% reduction in odds)
+- Mid-tier: 1.30 × 0.66 = 0.86 (14% reduction in odds)
+- Major Release: 1.30 × 0.72 = 0.94 (interaction not significant)
+- AAA: 1.30 × 0.77 = 1.00 (interaction not significant)
+
+This pattern reveals several crucial insights:
+
+1. **Differential Impact by Price Tier**: The negative effect of lacking localisation is strongest for budget/indie games (78% reduction) and weakest for free games (52% reduction). This directly contradicts Hypothesis 3, which proposed greater tolerance for lack of localisation in lower-priced games.
+
+2. **Text-Only Sufficiency Varies**: For free games, text-only localisation appears sufficient (no significant difference from full localisation), but for budget/indie and mid-tier games, text-only localisation significantly reduces Chinese player engagement compared to full localisation.
+
+3. **Price-Localisation Interaction Gradient**: The significance and magnitude of the negative interactions between localisation and price category decrease as price increases, suggesting that the differential effect of localisation is most pronounced in lower price tiers.
+
+4. **Budget/Indie Games Most Affected**: The strongest negative interaction is for budget/indie games with no localisation (OR = 0.46), indicating these games suffer the most severe penalty for lacking localisation relative to their fully localised counterparts.
+
+#### Comparison with Other Models
+
+While direct comparison with the USD model is not advisable due to different pricing structures, I can note patterns that align with findings from other models:
+
+1. **Indie Tag Model Alignment**: The combined odds ratio for non-localised indie games in model17_simple (OR = 0.26) aligns remarkably with the combined odds ratio for non-localised budget/indie-priced games in this model (OR = 0.22). This consistency suggests that both indie tagging and budget/indie pricing are capturing similar market segments with comparable localisation sensitivities.
+
+2. **Text-Heavy Game Model**: The combined odds ratio for non-localised text-heavy games in model16_simple (OR = 0.18) is even lower than for budget/indie games (OR = 0.22), suggesting that text intensity might be a stronger moderator of localisation effects than price category.
+
+3. **Explanatory Power**: With an R-Square of 0.350, this CNY price model has strong explanatory power, slightly higher than the USD model (0.345) and the indie tag model (0.300), indicating that CNY pricing combined with localisation status effectively captures variation in Chinese player engagement.
+
+#### Implications for Hypothesis 3
+
+These findings strongly **contradict Hypothesis 3**. Rather than observing greater tolerance for lack of localisation in cheaper games, I find the opposite pattern: budget/indie games experience the most severe negative impact from lacking localisation (78% reduction in odds), while free games show a comparatively smaller reduction (52%).
+
+Several factors might explain this counterintuitive finding:
+
+1. **Greater Investment Expectations**: When players pay for budget/indie games, they may have higher expectations for accessibility, including localisation, compared to Free to play games where there is no financial investment.
+
+2. **Free Game Player Demographics**: Players of free games might, on average, have different characteristics (such as higher willingness to overcome language barriers) compared to players of paid games. Some free-to-play games have dedicated servers specifically for players in mainland China, which are not connected to the servers on Steam. Players who choose to play Free to Play games on Steam may therefore demonstrate some forms of selection bias.
+
+3. **Value Proposition**: The lack of localisation might more severely undermine the value proposition of paid games compared to Free to play games.
+
+#### Methodological Considerations for Using CNY Model
+
+It's important to note several methodological strengths of this analysis, even though CNY model has more NA compares to USD model:
+
+1. **CNY Price Relevance**: Using CNY pricing better represents the actual price tiers experienced by Simplified Chinese players on Steam, as these are the prices they see in their store in Mainland China.
+
+2. **Market-Based Price Tiers**: The model uses meaningful price categories that reflect actual gaming industry segments rather than arbitrary quartiles.
+
+3. **Regional Pricing Context**: Steam recommends lower prices in the Mainland China store, and CNY generally has more purchasing power on Steam compared to USD, making the CNY model particularly relevant for understanding Chinese player behavior.
+
+4. **Strong Model Fit**: The high R-Square value (0.350) indicates that the model explains a substantial portion of the variation in Chinese review ratio.
+
+The CNY price category model reveals complex interactions between price tier and localisation effects that challenge our initial hypothesis. Instead of showing greater tolerance for lack of localisation in cheaper games, the evidence suggests that budget/indie games are most severely impacted by incomplete localisation. These findings highlight the importance of comprehensive localisation efforts particularly for budget/indie games seeking to maximize their reach in the Chinese market.
+
+The model also identifies clear genre preferences among Chinese players, with particular engagement in strategy, sci-fi, tactical, and cooperative games. These genre insights, combined with the localisation effects, provide valuable guidance for developers and publishers targeting the Chinese gaming market.
+
+### Sentiment Gap with Indie Game Interaction
+
+```{r h3-sentiment-gap-indie}
+# Table for the indie game interaction model for sentiment gap
+
+tab_model(model13_sg_wls_simple,
+          title = "Localisation Effect for Indie vs. Non-Indie Games (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Indie Game (Yes)",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Localisation: None × Indie Game",
+                         "Localisation: Text Only × Indie Game"),
+          dv.labels = "WLS Regression",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+
+# Same model with robust standard errors
+tab_model(model13_sg_wls_simple,
+          title = "Localisation Effect for Indie vs. Non-Indie Games (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Indie Game (Yes)",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Localisation: None × Indie Game",
+                         "Localisation: Text Only × Indie Game"),
+          dv.labels = "WLS Regression with Robust Standard Errors",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname",
+          vcov.fun = "vcovHC", 
+          vcov.args = list(type = "HC1"))
+```
+
+**Interpretation:**
+
+#### Focus on Significant Variables in Robust Model
+
+When analysing the Sentiment Gap model with indie game interaction using robust standard errors, several key variables emerge as statistically significant despite the heteroscedasticity adjustment:
+
+1. **Release Year Effects: A Clear Temporal Pattern**
+
+The most striking finding in the robust model is the consistent and significant pattern of release year effects:
+
+- **Release Year 2017**: Significant negative effect (-0.06, p = 0.028)
+- **Release Year 2018**: Significant negative effect (-0.05, p = 0.004)
+- **Release Year 2019**: Significant negative effect (-0.03, p = 0.025)
+- **Release Year 2020**: Significant negative effect (-0.06, p < 0.001)
+- **Release Year 2021**: Significant negative effect (-0.06, p < 0.001)
+- **Release Year 2022**: Significant negative effect (-0.07, p < 0.001)
+- **Release Year 2023**: Significant negative effect (-0.08, p < 0.001)
+- **Release Year 2024**: Significant negative effect (-0.14, p = 0.024)
+
+This reveals a robust temporal pattern where Chinese players have become increasingly critical relative to English players for games released in more recent years. The magnitude of the negative coefficients generally increases from 2017 (-0.06) to 2024 (-0.14), suggesting a progressively widening sentiment gap over time.
+
+Notably, Release Year 2025 (-0.08, p = 0.127) loses significance in the robust model despite being significant in the standard model, suggesting greater uncertainty about the most recent trend, since I collected data around mid March.
+
+2. **Key Patterns Observed**
+
+- 1. Robust Temporal Trend vs. Non-Robust Localisation Effects
+
+While the localisation main effects and interactions lose significance in the robust model, the release year effects remain largely significant. This suggests that temporal trends in Chinese player sentiment are more robust and potentially more important determinants of sentiment differences than localisation status or indie classification.
+
+- 2. Increasing Magnitude of Negative Sentiment
+
+The coefficients for release years show a generally increasing magnitude of negative sentiment gap:
+- Early period (2017-2019): -0.03 to -0.06
+- Middle period (2020-2022): -0.06 to -0.07
+- Recent period (2023-2024): -0.08 to -0.14
+
+This progression indicates that Chinese players have become progressively more critical relative to English players over time, with 2024 showing a particularly pronounced negative sentiment gap.
+
+- 3. Selection Effect in Operation
+
+The contrast between these findings and the Chinese review ratio models suggests a selection effect. While localisation strongly influences whether Chinese players engage with games (as shown in the review ratio models), among those who do engage, temporal factors appear more important in determining relative satisfaction than localisation or indie status.
+
+- 4. Different Dynamics for Engagement vs. Satisfaction
+
+The lack of robust significance for the localisation and indie interaction terms in the sentiment gap model, despite their strong significance in the review ratio model, highlights an important distinction: factors that influence whether Chinese players choose to play a game may differ from factors that influence how they rate it relative to English players.
+
+#### Comparison with Other Hypothesis 3 Findings
+
+1. **Price Category Models**: Similar to this indie interaction model, the price category models for sentiment gap also showed limited significant localisation interactions in their robust versions, with temporal trends emerging as more consistent predictors.
+
+2. **Review Ratio vs. Sentiment Gap**: While the Chinese review ratio models showed strong negative effects of lack of localisation, particularly for indie/budget games, the sentiment gap models consistently show weaker and less robust localisation effects after accounting for heteroscedasticity.
+
+3. **Limited Support for Hypothesis 3**: Across the various sentiment gap models, there is limited evidence that players are more tolerant of lack of localisation for indie or cheaper games. If anything, some models suggest potentially higher expectations for full localisation in indie games.
+
+In conclusion, while the indie game interaction model provides limited direct support for Hypothesis 3 regarding tolerance for lack of localisation in indie games, it reveals a compelling temporal pattern that suggests broader changes in the Chinese gaming market. Chinese players appear to be becoming increasingly critical relative to English players for games released in recent years, with this trend being more robust to heteroscedasticity concerns than the localisation and indie status effects.
+
+### Sentiment Gap with Price Category Interactions
+
+```{r h3-sentiment-gap-price}
+# Table for USD price category interaction models for sentiment gap
+tab_model(model12_usd_sg_wls,
+          title = "Localisation Effect by USD Price Category (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Price: Budget/Indie", 
+                         "Price: Mid-tier", 
+                         "Price: Major Release", 
+                         "Price: AAA",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Localisation: None × Budget/Indie",
+                         "Localisation: Text Only × Budget/Indie",
+                         "Localisation: None × Mid-tier",
+                         "Localisation: Text Only × Mid-tier",
+                         "Localisation: None × Major Release",
+                         "Localisation: Text Only × Major Release",
+                         "Localisation: None × AAA",
+                         "Localisation: Text Only × AAA"),
+          dv.labels = "WLS Regression",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+
+# Same model with robust standard errors
+tab_model(model12_usd_sg_wls,
+          title = "Localisation Effect by USD Price Category (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Price: Budget/Indie", 
+                         "Price: Mid-tier", 
+                         "Price: Major Release", 
+                         "Price: AAA",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Localisation: None × Budget/Indie",
+                         "Localisation: Text Only × Budget/Indie",
+                         "Localisation: None × Mid-tier",
+                         "Localisation: Text Only × Mid-tier",
+                         "Localisation: None × Major Release",
+                         "Localisation: Text Only × Major Release",
+                         "Localisation: None × AAA",
+                         "Localisation: Text Only × AAA"),
+          dv.labels = "WLS Regression with Robust Standard Errors",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname",
+          vcov.fun = "vcovHC", 
+          vcov.args = list(type = "HC1"))
+
+# Table for CNY price category interaction models for sentiment gap
+tab_model(model12_cny_sg_wls,
+          title = "Localisation Effect by CNY Price Category (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Price: Budget/Indie", 
+                         "Price: Mid-tier", 
+                         "Price: Major Release", 
+                         "Price: AAA",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Localisation: None × Budget/Indie",
+                         "Localisation: Text Only × Budget/Indie",
+                         "Localisation: None × Mid-tier",
+                         "Localisation: Text Only × Mid-tier",
+                         "Localisation: None × Major Release",
+                         "Localisation: Text Only × Major Release",
+                         "Localisation: None × AAA",
+                         "Localisation: Text Only × AAA"),
+          dv.labels = "WLS Regression",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname")
+
+# Same model with robust standard errors
+
+tab_model(model12_cny_sg_wls,
+          title = "Localisation Effect by CNY Price Category (Sentiment Gap)",
+          pred.labels = c("(Intercept)", 
+                         "Localisation: None", 
+                         "Localisation: Text Only",
+                         "Price: Budget/Indie", 
+                         "Price: Mid-tier", 
+                         "Price: Major Release", 
+                         "Price: AAA",
+                         "Release Year 2011", "Release Year 2012", "Release Year 2013", 
+                         "Release Year 2014", "Release Year 2015", "Release Year 2016",
+                         "Release Year 2017", "Release Year 2018", "Release Year 2019",
+                         "Release Year 2020", "Release Year 2021", "Release Year 2022",
+                         "Release Year 2023", "Release Year 2024", "Release Year 2025",
+                         "Log Total Reviews",
+                         "Localisation: None × Budget/Indie",
+                         "Localisation: Text Only × Budget/Indie",
+                         "Localisation: None × Mid-tier",
+                         "Localisation: Text Only × Mid-tier",
+                         "Localisation: None × Major Release",
+                         "Localisation: Text Only × Major Release",
+                         "Localisation: None × AAA",
+                         "Localisation: Text Only × AAA"),
+          dv.labels = "WLS Regression with Robust Standard Errors",
+          string.pred = "Predictors",
+          string.ci = "95% CI",
+          string.p = "P-Value",
+          show.se = TRUE,
+          show.stat = TRUE,
+          show.aic = TRUE,
+          show.r2 = TRUE,
+          show.reflvl = TRUE,
+          prefix.labels = "varname",
+          vcov.fun = "vcovHC", 
+          vcov.args = list(type = "HC1"))
+```
+
+
+**Interpretation:**
+
+## Important Note on Price Categories
+While both USD and CNY models use the same price category names (Budget/Indie, Mid-tier, Major Release, AAA), the actual price thresholds differ due to regional pricing on Steam. Steam recommends lower prices in the Mainland China store, and the CNY generally has more purchasing power on Steam compared to USD. Therefore:
+
+- A game priced at "Budget/Indie" level in CNY (≤50 CNY) might represent a different quality tier than a game at "Budget/Indie" level in USD (≤10 USD)
+- Direct comparison between USD and CNY models is not straightforward due to these different pricing structures
+- The CNY model more accurately reflects the actual price tiers experienced by Simplified Chinese players
+
+#### Key Significant Variables in Robust CNY Model
+
+1. **Release Year Effects**
+
+Several release years show significant or marginally significant effects, particularly for more recent years:
+
+- **Release Year 2012**: Positive effect (0.06, p = 0.045). Games released in 2012 have a significantly more positive sentiment gap, with Chinese players rating them more favorably relative to English players.
+
+- **Release Year 2022**: Negative effect (-0.03, p = 0.086). Games released in 2022 show a marginally significant negative sentiment gap, though this is just outside the conventional significance threshold.
+
+- **Release Year 2023**: Negative effect (-0.05, p = 0.011). Games released in 2023 have a significantly more negative sentiment gap, with Chinese players rating them less favorably relative to English players.
+
+- **Release Year 2024**: Negative effect (-0.10, p = 0.011). Games released in 2024 show the strongest negative sentiment gap of any release year, with a substantial and significant effect.
+
+These persistent release year effects suggest a temporal pattern in the sentiment gap that remains robust even after accounting for heteroscedasticity. The increasing magnitude of negative coefficients for more recent years (from -0.03 for 2022 to -0.10 for 2024) indicates a growing divergence in sentiment between Chinese and English players, with Chinese players becoming increasingly critical relative to English players.
+
+2. **Localisation and Price Interactions**
+
+- **Localisation: None × AAA**: Negative effect (-0.11, p = 0.064). This marginally significant interaction suggests that AAA games without Chinese localisation receive substantially more negative relative ratings from Chinese players compared to free games without localisation. This is the only localisation-price interaction that approaches significance in the robust model.
+
+The marginal significance of this interaction provides limited support for Hypothesis 3, but in an indirect way. Rather than showing that players are more tolerant of lack of localisation for cheaper games, it suggests that players are less tolerant of lack of localisation for premium AAA games. This implies higher expectations for expensive games.
+
+3. **Non-significant Variables in Robust Model**
+
+It's important to note that most of the effects that appeared significant in the standard model lose significance in the robust model:
+
+- The main effects for localisation ("None" and "Text Only") are not significant
+- The main effects for price categories are not significant
+- Most interaction terms between localisation and price categories are not significant
+
+This substantial change in significance between standard and robust models suggests that the apparent relationships in the standard model might be influenced by heteroscedasticity or outliers in the data. The robust standard errors are much larger than the conventional ones, reflecting greater variability in the data than the standard model accounts for.
+
+#### Combined Effects for Marginally Significant Interactions
+
+Despite the limited significance in the robust model, it's worth examining the combined effect for AAA games with no localisation, as this was the only marginally significant interaction:
+
+**No Localisation × AAA**: Combined effect = -0.00 (main effect) + 0.05 (AAA main effect) + (-0.11) (interaction) = -0.06
+
+This negative combined effect suggests that AAA games without Chinese localisation have a more negative sentiment gap compared to other price-localisation combinations. Chinese players who choose to play non-localised AAA games rate them less favorably relative to English players, indicating higher expectations for localisation in premium games.
+
+#### Temporal Patterns and Broader Context
+
+The persistent significance of release year effects in the robust model is particularly noteworthy. The pattern of increasingly negative sentiment gaps for more recent years (2022-2024) suggests evolving dynamics in the Chinese gaming market:
+
+1. **Rising Expectations**: Chinese players may have increasingly higher expectations for games as the market matures.
+
+2. **Changing Player Demographics**: The composition of Chinese players on Steam may be evolving, potentially including more players with different preferences and standards.
+
+This temporal pattern seems more robust than the localisation-price interactions, suggesting that year-specific factors may be more important determinants of sentiment gap than the price-localisation relationship proposed in Hypothesis 3.
+
+#### Comparison with Chinese Review Ratio Models
+
+While the sentiment gap models show limited significant interactions between localisation and price categories in the robust version, it's worth noting that the Chinese review ratio models showed stronger and more persistent effects:
+
+1. **Direction of Effects**: In the review ratio models, lack of localisation had a strong negative effect on Chinese player engagement across all price categories, with budget/indie games experiencing a particularly severe penalty.
+
+2. **Contrasting Patterns**: The sentiment gap analysis reveals a different dynamic. While localisation strongly affects whether Chinese players engage with games (review ratio), it has less robust effects on how those who do engage rate the games relative to English players (sentiment gap).
+
+This contrast suggests a possible selection effect: Chinese players who choose to play non-localised games despite the language barrier may have different characteristics (such as higher English proficiency) that influence their relative satisfaction with these games.
+
+#### Support for Hypothesis 3
+
+The CNY model with robust standard errors provides limited support for Hypothesis 3:
+
+1. **Limited Significant Interactions**: Most interactions between localisation and price categories are not significant in the robust model, providing little evidence that the effect of localisation on sentiment gap varies systematically across price tiers.
+
+2. **AAA Exception**: The marginally significant negative interaction for "No Localisation × AAA" (p = 0.064) provides some evidence that Chinese players have higher localisation expectations for premium AAA games. This indirectly supports the hypothesis by showing that players are less tolerant of lack of localisation for expensive games, rather than directly demonstrating greater tolerance for cheaper games.
+
+3. **Complex Relationship**: The findings suggest a more complex relationship between price, localisation, and player sentiment than proposed in the simple hypothesis.
+
+The contrast between the Chinese review ratio and sentiment gap models highlights an important distinction: localisation strongly affects whether Chinese players engage with games, but among those who do engage, the relative satisfaction (compared to English players) appears less systematically related to localisation and price interactions than Hypothesis 3 would suggest.
+
+## Model Comparison and Synthesis
+
+```{r model-comparison}
+# Create model comparison table for Chinese Review Ratio models
+review_ratio_comparison <- data.frame(
+  Model = c("Base Model (13)", 
+           "Year Interaction (20)", 
+           "Text-Heavy Interaction (16 Simple)", # Changed here
+           "Indie Interaction (17 Simple)",
+           "USD Price Interaction (18)",
+           "CNY Price Interaction (19)"),
+  Pseudo_R2 = c(summary(model13)$pseudo.r.squared,
+               summary(model20)$pseudo.r.squared,
+               summary(model16_simple)$pseudo.r.squared, # Changed here
+               summary(model17_simple)$pseudo.r.squared,
+               summary(model18)$pseudo.r.squared,
+               summary(model19)$pseudo.r.squared),
+  AIC = round(c(AIC(model13), AIC(model20), 
+              AIC(model16_simple), # Changed here
+              AIC(model17_simple), AIC(model18), AIC(model19))),
+  BIC = round(c(BIC(model13), BIC(model20), 
+              BIC(model16_simple), # Changed here
+              BIC(model17_simple), BIC(model18), BIC(model19)))
+)
+
+# Create model comparison table for Sentiment Gap models
+sentiment_gap_comparison <- data.frame(
+  Model = c("Base Model (9)", 
+           "Year Interaction (10)", 
+           "Text-Heavy Interaction (11)", 
+           "Indie Interaction (13 Simple)",  # Changed here
+           "USD Price Interaction (12 USD)",
+           "CNY Price Interaction (12 CNY)"),
+  R2 = c(summary(model9_sg_wls)$r.squared,
+         summary(model10_sg_poly_wls)$r.squared,
+         summary(model11_sg_wls)$r.squared,
+         summary(model13_sg_wls_simple)$r.squared,  # Changed here
+         summary(model12_usd_sg_wls)$r.squared,
+         summary(model12_cny_sg_wls)$r.squared),
+  AIC = round(c(AIC(model9_sg_wls), AIC(model10_sg_poly_wls), AIC(model11_sg_wls), 
+              AIC(model13_sg_wls_simple), AIC(model12_usd_sg_wls), AIC(model12_cny_sg_wls))), 
+  BIC = round(c(BIC(model9_sg_wls), BIC(model10_sg_poly_wls), BIC(model11_sg_wls), 
+              BIC(model13_sg_wls_simple), BIC(model12_usd_sg_wls), BIC(model12_cny_sg_wls)))
+)
+
+# Display the comparison table
+kable(sentiment_gap_comparison,
+      caption = "Model Comparison for Sentiment Gap Models")
+```
+
+# Discussion
+
+In conducting this regression analysis of Chinese localisation's impact on game popularity, I've identified several key limitations and confounding variables that warrant careful consideration. These factors, not directly captured in my statistical models, have important implications for the interpretation and generalisability of the findings.
+
+## The Role of Community Localisation ("汉化")
+
+A significant limitation of my research is the inability to account for community-based localisation efforts—known as "汉化" (hànhuà)—in the Chinese gaming community. This grassroots phenomenon represents a parallel ecosystem of localisation that exists outside official channels:
+
+Many Chinese players actively participate in creating, sharing, and using fan-made translation patches, particularly for narrative-heavy or popular titles that lack official Chinese support. These community translations can range from basic text translations to sophisticated modifications that alter game files to display Chinese characters, modify menus, and even replace graphics containing text.
+
+This phenomenon has substantial implications for my regression results. Games that appear in my dataset as having "No Localisation" may actually have high-quality, widely-used community translations. This could explain some counterintuitive findings, particularly in the sentiment gap analysis where non-localised games sometimes showed less negative sentiment than expected. Players accessing these games through community translations might rate them positively despite the lack of official localisation.
+
+The indie game interaction models are particularly susceptible to this confounding effect. While my findings suggest that indie games suffer more severely from lack of localisation (contrary to Hypothesis 3), this might be partially explained by selection effects—popular indie games are more likely to receive community translations, potentially biasing the sample of non-localised indie games toward less popular titles that failed to attract community localisation efforts.
+
+Future research would benefit enormously from incorporating data on community localisation prevalence, perhaps through web scraping of popular Chinese gaming forums like NGA, Tieba, or Steam community groups where these translations are shared.
+
+## Temporal Pricing Dynamics
+
+My analysis relies on current price points rather than historical pricing data, which fails to capture the dynamic nature of game pricing on Steam. This limitation is particularly relevant when interpreting the price category interaction models:
+
+Steam's frequent promotional events (Summer Sale, Winter Sale, publisher-specific discounts) create substantial fluctuations in pricing over time. A game like "The Witcher 3," initially priced above 200 CNY, might be available for less than 50 CNY during major sales. This means that games I've classified as "Major Release" or "AAA" based on current pricing might have been accessible to many players at "Budget/Indie" price points.
+
+This temporal disconnect may partially explain the inconsistent findings in the price interaction models. The strong negative interaction between lack of localisation and budget/indie pricing category (OR = 0.46, p < 0.001) might reflect a more complex relationship—players purchasing during deep discounts may have different expectations regarding localisation than those paying full price.
+
+The temporal pricing dynamics also interact with release year effects. Older games tend to receive deeper discounts over time, potentially confounding the release year coefficients in my models. The significant negative temporal trend in sentiment gap for more recent years (2022-2024) might partially reflect pricing expectations rather than changing attitudes toward localisation.
+
+## Free-to-Play Monetisation Strategies
+
+My models treat free-to-play (F2P) games as a homogeneous category without accounting for their diverse monetisation strategies. This oversimplification likely affects the interpretation of the price category models:
+
+F2P games on Steam vary dramatically in their monetisation approaches—from cosmetic-only microtransactions to aggressive "pay-to-win" mechanics or "gacha" systems. The long-term financial investment required for meaningful progression in some F2P titles can far exceed the upfront cost of AAA games. My analysis does not capture these nuanced financial dynamics.
+
+This limitation is particularly relevant when interpreting the finding that F2P games show less sensitivity to localisation (OR = 0.48 for no localisation) compared to Budget/Indie games (combined OR = 0.22). Rather than reflecting lower expectations for free games, this might indicate strategic localisation decisions by F2P developers who rely on ongoing player engagement for revenue. F2P games with substantial Chinese player bases likely prioritise localisation to maximise potential spending.
+
+The review metrics themselves may be influenced by these monetisation strategies. Players who make significant in-game purchases may have different review behaviours compared to those who play without spending. This could introduce selection bias in the F2P category that is not present in traditional purchase models.
+
+## Review Temporality and Accumulation
+
+A critical limitation of my dataset is the lack of temporal information regarding when reviews were submitted. The Steam API provides only aggregate review counts without timestamps, creating a potentially significant confounding variable:
+
+Games released in earlier years (e.g., 2010-2015) have had significantly more time to accumulate reviews than those released recently. This accumulation period spans different eras in Chinese gaming market development, including the massive growth in Chinese PC gaming from 2016-2020. A game released in 2015 might have reviews spanning a decade, capturing evolving player expectations and market conditions.
+
+This temporal ambiguity makes it difficult to interpret the significant release year effects observed in the sentiment gap models. The increasingly negative sentiment gap for games released in recent years (2020-2024) could reflect genuine changes in expectations, but might also be influenced by when reviews were written, who was writing them, and the evolving relationship between Chinese players and Steam as a platform.
+
+The polynomial time trends in Hypothesis 1 testing might be particularly affected by this limitation. The finding that localisation effects have generally increased rather than decreased over time might reflect changes in reviewer composition rather than evolving market expectations.
+
+## Cross-Cultural Review Behaviour
+
+My research fundamentally relies on review proportions and sentiment as proxies for player engagement and satisfaction, but cannot account for cultural differences in review behaviour:
+
+There may be systematic differences in how likely players from different regions are to leave reviews. If Chinese players are more likely to review games they enjoy (or conversely, more likely to critique games they dislike) compared to English-speaking players, this would systematically bias the sentiment gap measurement. My models assume comparable review behaviour across cultures, which may not be valid.
+
+Language choice itself represents a significant selection bias. Chinese players with strong English proficiency might choose to write reviews in English rather than Chinese, particularly for games without Chinese localisation. This would systematically remove their perspectives from the Chinese review metrics, potentially exaggerating the negative effect of lacking localisation on Chinese player engagement.
+
+Social and community factors might also influence review patterns. In the Chinese gaming community, there have been instances of "review bombing" campaigns targeting games for politically sensitive content or perceived slights against Chinese players. These coordinated actions would affect both the proportion and sentiment metrics in ways unrelated to localisation quality.
+
+## Localisation Quality and Implementation
+
+My binary classification of localisation status (None/Text-Only/Audio+Text) fails to capture the substantial variation in localisation quality and implementation across games:
+
+Localisation quality varies enormously—from direct machine translations to culturally nuanced adaptations by professional translators familiar with gaming terminology. My dataset cannot distinguish between a perfunctory localisation that merely translates menu items and a comprehensive one that carefully adapts cultural references, jokes, and gameplay instructions.
+
+The self-reported nature of localisation tags in the Steam store introduces additional uncertainty. Developers themselves determine what constitutes "full" text support or audio localisation, and these claims may not align with player expectations or experiences. Some games might claim localisation for minimal text elements while ignoring crucial gameplay instructions.
+
+This limitation particularly affects the interpretation of the text-heavy game interaction models. The significant interaction between text-heavy status and localisation (OR = 0.51 for no localisation) might reflect not just the importance of localisation for text-intensive games, but also higher quality standards for such localisations given their centrality to the gameplay experience.
+
+## Platform Market Differences
+
+My research examines only the Steam platform, which occupies a unique position in the Chinese gaming market compared to its role in other regions:
+
+Gaming consoles historically faced significant regulatory restrictions in China until 2015, and even now have limited market penetration compared to PC gaming. This means that Steam reviews from Chinese players may represent a more comprehensive cross-section of the gaming population than in markets like Japan, the US, or the UK, where console gaming captures a substantial market share.
+
+The distribution of games across platforms is not random—certain genres and developers favour particular platforms. Strategy games, simulator titles, and indie games tend to be more PC-centric, while action-adventure titles, sports games, and major franchises often prioritise console releases. This selection effect means my findings might not generalise to the broader gaming market beyond Steam.
+
+This platform specificity is particularly relevant when interpreting the genre factor coefficients in my models. The strong positive associations between Chinese review ratio and genres like "Chaotic Top-Down Shooters" and "City Builders & Economic Management" likely reflect platform-specific preferences rather than universal Chinese player preferences. Many indie games or certain types of genres might only available on PC (through Steam). 
+
+## Synthesis: Accountability and Generalisability
+
+When considering these limitations collectively, several important implications emerge for the accountability and generalisability of my regression models:
+
+1. **Temporal Robustness:**
+The most temporally robust finding appears to be the basic effect of localisation on Chinese player engagement (review ratio). This effect remains significant and substantial across all model specifications, suggesting it transcends the temporal limitations of my data. However, the time trend analysis (Hypothesis 1) should be interpreted cautiously given the conflation of game release year with review accumulation patterns.
+
+2. **Differential Effects Generalisability:**
+The finding that localisation effects vary systematically by game characteristics (text-heavy status, price tier, indie status) appears robust across model specifications, but the specific magnitudes and directions should be treated more cautiously. The stronger negative effect of lacking localisation for text-heavy games (OR = 0.51 interaction) represents the most theoretically coherent and generalisable finding.
+
+3. **Selection Effects on Sentiment Gap:**
+The sentiment gap analysis is particularly vulnerable to selection effects. The counterintuitive finding that lack of localisation sometimes has positive or non-significant effects on relative sentiment likely reflects selection bias—only Chinese players with sufficient English proficiency would play non-localised games. This limits the generalisability of the sentiment gap findings.
+
+4. **Confounders vs. Mediators:**
+Some factors I've identified as limitations might better be understood as mediating variables rather than simple confounders. Community localisation, for instance, represents a community response to lack of official localisation, making it part of the causal pathway rather than an independent confounder. This suggests my models may still capture meaningful relationships despite these limitations.
+
+5. **External Validity:**
+The generalisability of these findings beyond Steam is limited, particularly for console-centric genres or games with significant mobile presence in China. The Chinese mobile gaming market operates under substantially different regulatory and platform conditions than Steam.
+
+6. **Practical Application Confidence:**
+Despite these limitations, my finding that Chinese localisation substantially impacts Chinese player engagement appears robust and actionable for developers. The specific nuances regarding text-heaviness and genre preferences provide valuable guidance, even if the precise magnitudes require cautious interpretation.
+
+
+# Appendix (GENERATE BY AI)
+
+## Alternative Model Specifications
+
+Several alternative modelling approaches could enhance the analysis and address some of the limitations identified in the Discussion section.
+
+### Multilevel/Mixed-Effects Models
+
+```r
+# Mixed-effects beta regression for Chinese review ratio
+model_mixed <- glmmTMB(sc_ratio_adj ~ localisation_combo + 
+                      (1|release_year) + log(total_reviews) + 
+                      genre_factors, 
+                      family=beta_family, data=steam_data)
+                      
+# Mixed-effects model for sentiment gap
+model_mixed_sg <- lmer(sentiment_gap ~ localisation_combo + 
+                     (1|release_year) + log(total_reviews) + 
+                     genre_factors, 
+                     weights=weights_vector, data=steam_data)
+```                  
+this approach would treat years as random effects drawn from a distribution rather than as individual fixed effects, potentially providing a more parsimonious model of temporal trends that could better address Hypothesis 1 about shrinking localisation effects over time.
+
+### Quantile Regression for Sentiment Gap
+```r
+model_quantile <- rq(sentiment_gap ~ localisation_combo*text_heavy_game + 
+                    release_year + log(total_reviews),
+                    tau=c(0.25, 0.5, 0.75), data=steam_data)
+```
+
+This could reveal whether localisation particularly affects games with extremely positive or negative sentiment gaps, providing more nuanced insights than the current models focusing on average effects.
+
+### Ordinal Regression for Categorised Outcomes
+
+Creating ordinal categories of Chinese engagement (Low/Medium/High) based on review proportions would allow for testing threshold effects:
+```r
+# Create ordinal outcome from continuous ratio
+steam_data$sc_engagement <- cut(steam_data$sc_ratio_adj, 
+                              breaks=c(0, 0.1, 0.3, 1), 
+                              labels=c("Low", "Medium", "High"))
+
+model_ordinal <- polr(sc_engagement ~ localisation_combo*price_cny_category + 
+                    release_year + log(total_reviews) + 
+                    genre_factors, data=steam_data)
+```                   
+                    
+This approach might better capture non-linear thresholds in Chinese player engagement that aren't apparent in continuous models.               
+
+### Models for Additional Hypotheses
+
+Beyond the existing hypotheses, several new research questions could be explored:
+
+#### 1. Genre-Specific Localisation Effects
+
+Examining whether the impact of localisation varies systematically across different game genres beyond the text-heavy distinction:
+
+```r
+# Select top 3-4 genre factors that showed strongest effects in base models
+model_genre_specific <- betareg(sc_ratio_adj ~ localisation_combo*genre_factor1 + 
+                             localisation_combo*genre_factor2 + 
+                             localisation_combo*genre_factor3 + 
+                             release_year + log(total_reviews), 
+                             data=steam_data)
+```
+
+#### 2. Developer/Publisher Reputation Effects
+
+Testing whether developer/publisher reputation moderates the effect of localisation:
+
+```r
+# Create a reputation variable based on average review counts
+steam_data <- steam_data %>%
+  group_by(developers) %>%
+  mutate(developer_reputation = mean(total_reviews, na.rm=TRUE)) %>%
+  ungroup() %>%
+  mutate(developer_tier = ntile(developer_reputation, 3))
+
+model_reputation <- betareg(sc_ratio_adj ~ localisation_combo*factor(developer_tier) + 
+                         release_year + log(total_reviews) + 
+                         genre_factors, data=steam_data)
+```
+
+#### 3. Regional Pricing Strategy Models
+
+Investigating whether games with more favorable regional pricing for China show different localisation effects:
+
+```r
+# Create price ratio variable comparing CNY to USD pricing
+steam_data <- steam_data %>%
+  mutate(price_usd_num = as.numeric(gsub("Free", "0", price_usd)),
+         price_cny_num = as.numeric(gsub("Free", "0", price_cny)),
+         price_ratio = ifelse(!is.na(price_usd_num) & !is.na(price_cny_num) & price_usd_num > 0,
+                             price_cny_num/(price_usd_num*6.5), NA),
+         price_ratio_category = cut(price_ratio, 
+                                  breaks=c(0, 0.8, 1.2, Inf), 
+                                  labels=c("China_Discount", "Parity", "China_Premium")))
+
+model_regional_pricing <- betareg(sc_ratio_adj ~ localisation_combo*price_ratio_category + 
+                              release_year + log(total_reviews) + 
+                              genre_factors, data=steam_data)
+```
+
+#### 4. Current Player Count Models
+
+Examining whether localisation affects active player retention differently from review engagement:
+
+```r
+# Log-transform current player count to handle skewness
+model_player_count <- lm(log(current_player_count + 1) ~ localisation_combo*price_cny_category + 
+                       release_year + log(total_reviews) + 
+                       genre_factors, data=steam_data)
+```
+
+### Addressing Selection Bias: Propensity Score Matching
+
+To better account for potential selection bias in localisation decisions:
+
+```r
+library(MatchIt)
+# Create binary localisation variable
+steam_data$localised <- ifelse(steam_data$localisation_combo %in% 
+                           c("Audio + Text", "Text Only"), 1, 0)
+
+# Propensity score matching
+match_model <- matchit(localised ~ release_year + log(total_reviews) + 
+                     genre_factors, method = "nearest", 
+                     data = steam_data)
+
+matched_data <- match.data(match_model)
+
+# Outcome analysis on matched sample
+outcome_model <- betareg(sc_ratio_adj ~ localised + 
+                      text_heavy_game + price_cny_category, 
+                      data = matched_data)
+```
+
+This approach would compare games with similar characteristics that differ only in localisation status, potentially providing estimates closer to causal effects and addressing some of the confounding factors identified in the Discussion section, particularly regarding selection bias and the non-random nature of localisation decisions.
+
+### Structural Equation Modeling
+
+For testing complex causal pathways involving direct and indirect effects:
+
+```r
+library(lavaan)
+model_sem <- '
+  # Measurement model
+  text_intensity =~ text_heavy_game + has_story_rich_tag + has_visual_novel_tag
+  
+  # Structural model
+  sc_ratio_adj ~ localisation_combo + text_intensity + price_cny_category
+  sentiment_gap ~ localisation_combo + text_intensity + price_cny_category
+  
+  # Moderation effects
+  sc_ratio_adj ~ localisation_combo:text_intensity + localisation_combo:price_cny_category
+  sentiment_gap ~ localisation_combo:text_intensity + localisation_combo:price_cny_category
+'
+
+fit_sem <- sem(model_sem, data = steam_data)
+```
+
+This approach would allow for modelling latent variables (like text intensity) and testing complex path relationships between variables, which might better capture the nuanced relationships between game characteristics, localisation decisions, and player responses.
+
+These alternative specifications would address several limitations identified in the Discussion section, particularly those related to temporal confounding, selection effects, and the complex interplay between game characteristics and localisation impacts.
+
