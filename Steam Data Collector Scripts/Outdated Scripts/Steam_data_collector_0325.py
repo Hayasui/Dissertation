@@ -3,6 +3,7 @@ import time
 import json
 import pandas as pd
 from datetime import datetime
+import ast
 import os
 import pickle
 import re
@@ -12,12 +13,13 @@ import hashlib
 import concurrent.futures
 import threading
 from typing import List, Dict, Any, Tuple, Set
+from bs4 import BeautifulSoup
 
 # Define multiple API keys
 API_KEYS = [
-    "K1",          # Key 1
-    "K2",          # Key 2
-    "K3"           # Key 3
+    "X",          # Key 1
+    "X",          # Key 2
+    "X"           # Key 3
 ]
 
 # Create output directory
@@ -39,7 +41,6 @@ PROCESSED_GAMES_FILE = os.path.join(output_dir, "processed_games.json")
 API_USAGE_FILE = os.path.join(output_dir, "api_usage.json")
 CSV_RESULTS_FILE = os.path.join(output_dir, "steam_data.csv")
 DLC_LOG_FILE = os.path.join(output_dir, "dlc_filtering_log.json")
-KEYWORD_LOG_FILE = os.path.join(output_dir, "keyword_filtering_log.json")
 
 # Pre-compiled regex patterns for language support parsing
 AUDIO_FOOTNOTE_PATTERN = re.compile(r'<[^>]+>([*#^+])[^<]*audio[^<]*', re.IGNORECASE)
@@ -223,46 +224,64 @@ def cached_api_request(url, params, cache_duration_hours=24):
     actual_params = params.copy()
     actual_params['key'] = key_manager.get_current_key()
     
-    # Make the actual API request
-    try:
-        response = requests.get(url, params=actual_params)
-        key_manager.record_api_call()
-        
-        # Handle rate limiting with 429 error (TOO MANY REQUESTS)
-        if response.status_code == 429:
-            print(f"Rate limit exceeded (429) for key {key_manager.get_current_key()[:8]}...")
-            # Apply penalty to force key rotation
-            current_key = key_manager.get_current_key()
-            key_manager.call_counters[current_key] += 1000  # Penalty count to force rotation
-            key_manager.rotate_key()
-            print(f"Rotated to key: {key_manager.get_current_key()[:8]}...")
-            time.sleep(2.0)  # Add additional delay after rate limit
-            return None
-        
-        # Only cache successful responses
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    json.dump(data, f)
-                # Insert delay for rate limiting
-                time.sleep(1.0)
-                return data
-            except Exception as e:
-                print(f"Error caching response: {e}")
-                # Insert delay for rate limiting
-                time.sleep(1.0)
-                return response.json()
-        else:
-            print(f"HTTP error {response.status_code} for URL {url}")
-            # Insert delay for rate limiting
-            time.sleep(1.0)
-            return None
+    # Make the actual API request with retry function
+    max_retries = 3
+    for retry in range(max_retries):
+        try:
+            response = requests.get(url, params=actual_params, timeout=10)
+            key_manager.record_api_call()
             
-    except Exception as e:
-        print(f"Request error: {e}")
-        time.sleep(1.0)
-        return None
+            # Handle rate limiting with 429 error (TOO MANY REQUESTS)
+            if response.status_code == 429:
+                print(f"Rate limit exceeded (429) for key {key_manager.get_current_key()[:8]}...")
+                # Apply penalty to force key rotation
+                current_key = key_manager.get_current_key()
+                key_manager.call_counters[current_key] += 1000  # Penalty count to force rotation
+                key_manager.rotate_key()
+                print(f"Rotated to key: {key_manager.get_current_key()[:8]}...")
+                time.sleep(2.0)  # Add additional delay after rate limit
+                
+                # Instead of returning None, retry with the new key if retries remain
+                if retry < max_retries - 1:
+                    print(f"Retrying with new API key ({retry+1}/{max_retries})...")
+                    continue
+                else:
+                    return None
+            
+            # Only cache successful responses
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(data, f)
+                    # Insert delay for rate limiting
+                    time.sleep(1.0)
+                    return data
+                except Exception as e:
+                    print(f"Error caching response: {e}")
+                    # Insert delay for rate limiting
+                    time.sleep(1.0)
+                    return response.json()
+            else:
+                print(f"HTTP error {response.status_code} for URL {url}")
+                # Try again if retries remain
+                if retry < max_retries - 1:
+                    print(f"Retrying after HTTP error ({retry+1}/{max_retries})...")
+                    time.sleep(2 * (retry + 1))  # Exponential backoff
+                    continue
+                else:
+                    # Insert delay for rate limiting
+                    time.sleep(1.0)
+                    return None
+                
+        except Exception as e:
+            if retry < max_retries - 1:
+                print(f"Retrying API call after error ({retry+1}/{max_retries}): {e}")
+                time.sleep(2 * (retry + 1))  # Exponential backoff
+            else:
+                print(f"API call failed after {max_retries} attempts: {e}")
+                time.sleep(1.0)
+                return None
 
 # Unified Date Parsing
 def parse_steam_date(date_str):
@@ -346,13 +365,13 @@ def deduplicate_csv_file(csv_path):
         print(f"Error deduplicating CSV: {e}")
         return False
 
-# Initialize results file
+# Initialise results file
 def initialise_results_file(output_path):
     """Initialize CSV file with headers for incremental writing."""
     # Define all possible headers (complete set for your data)
     headers = [
         'app_id', 'english_name', 'chinese_name', 'developers', 'publishers',
-        'release_date', 'supported_languages', 'genres', 'user_tags',
+        'release_date', 'supported_languages', 'genres', 'user_tags', 'game_tags',
         'price_usd', 'price_cny', 'is_free', 'current_player_count',
         'chinese_simplified_interface_subtitles', 'chinese_simplified_audio',
         'chinese_traditional_interface_subtitles', 'chinese_traditional_audio',
@@ -482,34 +501,82 @@ def run_r_script(script_path):
         print(f"Error running R script: {e}")
         return False
 
-# Function to get store page tags
+# Function to get store page tags with improved pattern matching
 def get_store_page_tags(app_id):
-    """Try to extract more detailed tag information from the store page."""
+    """
+    Extract tag information from Steam store page using precise selectors
+    based on actual HTML structure.
+    """
     import re
+    import time
+    import requests
+    from bs4 import BeautifulSoup
     
-    # Make a request to the store page
+    # Make a request to the store page with age verification parameters
     url = f"https://store.steampowered.com/app/{app_id}"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+    }
+    
+    # Parameters and cookies to bypass age verification
+    params = {'birthtime': '536457600'}
+    cookies = {
+        'birthtime': '536457600',
+        'lastagecheckage': '1-January-1987',
+        'wants_mature_content': '1',
+        'mature_content': '1'
     }
     
     try:
-        response = requests.get(url, headers=headers)
+        # Add a delay to prevent rate limiting
+        time.sleep(2.0)
         
-        # Look for the popular tags section
+        # First try with parameters and cookies for age verification
+        response = requests.get(url, headers=headers, params=params, cookies=cookies)
+        
         if response.status_code == 200:
-            # Try to find popular tags
-            popular_tags_match = re.search(r'Popular user-defined tags for this product:(.*?)</div>', response.text, re.DOTALL)
+            # Parse with BeautifulSoup for more reliable HTML handling
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-            if popular_tags_match:
-                tags_html = popular_tags_match.group(1)
-                # Extract individual tags - they're usually in <a> elements
-                tags = re.findall(r'">([^<]+)</a>', tags_html)
+            # Method 1: Primary exact selector - matches the HTML you shared
+            tag_links = soup.select('div.app_tags.popular_tags a.app_tag')
+            if tag_links:
+                tags = [tag.text.strip() for tag in tag_links]
+                print(f"Found {len(tags)} tags using primary selector")
+                return tags
+            
+            # Method 2: Try alternate selectors in case the structure varies slightly
+            tag_links = soup.select('div.popular_tags a.app_tag')
+            if tag_links:
+                tags = [tag.text.strip() for tag in tag_links]
+                print(f"Found {len(tags)} tags using secondary selector")
+                return tags
                 
-                # Clean up and return
-                return [tag.strip() for tag in tags if tag.strip()]
-        
-        return []
+            # Method 3: Look for any app_tag elements anywhere in the page
+            tag_links = soup.select('a.app_tag')
+            if tag_links:
+                tags = [tag.text.strip() for tag in tag_links]
+                print(f"Found {len(tags)} tags using fallback app_tag selector")
+                return tags
+            
+            # Method 4: Use regex as a last resort
+            # This looks for the exact tag pattern from your HTML
+            tag_pattern = r'<a class="app_tag"[^>]*>([^<]+)</a>'
+            tag_matches = re.findall(tag_pattern, response.text)
+            if tag_matches:
+                tags = [tag.strip() for tag in tag_matches]
+                print(f"Found {len(tags)} tags using regex pattern")
+                return tags
+            
+            # No tags found with any method
+            print(f"No tags found for app_id {app_id}")
+            return []
+            
+        else:
+            print(f"HTTP error {response.status_code} for URL {url}")
+            return []
+            
     except Exception as e:
         print(f"Error fetching store page tags: {e}")
         return []
@@ -566,7 +633,10 @@ def check_app_relationship(app_id):
     details = get_game_details(app_id)
     
     if not details or str(app_id) not in details or not details[str(app_id)]['success']:
-        return (True, "Could not get app details", None)
+        # CHANGED: Return False instead of True when API fails
+        # This allows games to pass through when API issues occur
+        print(f"Warning: Could not get app details for {app_id}, assuming it's a game")
+        return (False, "Could not verify game status due to API issues", None)
     
     app_data = details[str(app_id)]['data']
     reasons = []
@@ -581,14 +651,7 @@ def check_app_relationship(app_id):
             reasons.append(f"App has type '{app_type}' (not 'game')")
             return (True, "; ".join(reasons), details)
     
-    # Check 2: Check for 'fullgame' reference (common in DLCs)
-    if 'fullgame' in app_data:
-        fullgame_id = app_data['fullgame']['appid']
-        fullgame_name = app_data['fullgame']['name']
-        reasons.append(f"App is related to full game '{fullgame_name}' (ID: {fullgame_id})")
-        return (True, "; ".join(reasons), details)
-    
-    # Check 3: Check for DLC-like categories
+    # Check 2: Check for DLC-like categories
     dlc_categories = ['downloadable content', 'dlc']
     if 'categories' in app_data:
         for category in app_data['categories']:
@@ -596,7 +659,7 @@ def check_app_relationship(app_id):
                 reasons.append(f"App has DLC-related category: '{category['description']}'")
                 return (True, "; ".join(reasons), details)
 
-    # Check 4: Required app check (DLCs often have required apps)
+    # Check 3: Required app check (DLCs often have required apps)
     if app_data.get('required_age', 0) == 0 and len(app_data.get('developers', [])) == 0:
         if any(pattern in app_data.get('name', '').lower() for pattern in ['dlc', 'pack', 'expansion']):
             reasons.append("App has DLC-like name with no age requirement and no developers")
@@ -620,7 +683,6 @@ def get_all_games():
     
     print(f"Total apps from Steam API: {len(all_apps)}")
     
-    # Simple filtering - just return all apps for now
     # Detailed filtering will be done in process_single_game
     filtered_apps = all_apps
     
@@ -746,6 +808,131 @@ def parse_language_support(supported_languages_str):
     
     return language_support
 
+# Tag normalization functions for avoiding duplicates
+def normalize_tag(tag):
+    """Normalize a tag to a standard form for comparison."""
+    # Convert to lowercase
+    normalized = tag.lower()
+    
+    # Handle specific common variants
+    tag_variants = {
+        'single-player': 'singleplayer', 
+        'multi-player': 'multiplayer',
+        'online pvp': 'pvp',
+        'co-op': 'coop',
+        'online co-op': 'onlinecoop',
+        'split-screen': 'splitscreen',
+        'first-person': 'firstperson',
+        'third-person': 'thirdperson',
+        # Add more variants as needed
+    }
+    
+    # Check if this tag is a known variant
+    for variant, standard in tag_variants.items():
+        if normalized == variant:
+            return standard
+    
+    # Remove hyphens and spaces for general comparison
+    normalized = normalized.replace('-', '').replace(' ', '')
+    
+    return normalized
+
+def is_semantic_duplicate(new_tag, existing_tags):
+    """Check if a tag is semantically equivalent to any existing tag."""
+    normalized_new = normalize_tag(new_tag)
+    normalized_existing = [normalize_tag(tag) for tag in existing_tags]
+    
+    return normalized_new in normalized_existing
+
+def convert_to_list(tags_data):
+    """Convert various tag formats to a proper list."""
+    if not tags_data or pd.isna(tags_data) or tags_data == '':
+        return []
+        
+    if isinstance(tags_data, list):
+        return tags_data
+        
+    if isinstance(tags_data, str):
+        # Check if it's a string representation of a list
+        if tags_data.startswith('[') and tags_data.endswith(']'):
+            # Remove any quotes around the entire string if present
+            tags_data = tags_data.strip('"\'')
+            
+            try:
+                # First try ast.literal_eval which is safer than eval
+                return ast.literal_eval(tags_data)
+            except (SyntaxError, ValueError) as e:
+                # Try JSON parse with proper quote handling
+                try:
+                    # Replace single quotes with double quotes for JSON compatibility
+                    json_str = tags_data.replace("'", '"')
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    # Fallback to simple string parsing
+                    clean_str = tags_data.strip('[]')
+                    # Handle quoted items in the list
+                    if '"' in clean_str or "'" in clean_str:
+                        # This is a complex string with quotes - try regex approach
+                        import re
+                        pattern = r'\'([^\']*?)\'|"([^"]*?)"|([\w\s\-\.]+)'
+                        matches = re.findall(pattern, clean_str)
+                        return [next(s for s in match if s) for match in matches]
+                    else:
+                        # Simple comma-separated values
+                        return [tag.strip() for tag in clean_str.split(',')]
+        else:
+            # Just a plain comma-separated string
+            return [tag.strip() for tag in tags_data.split(',')]
+    
+    return []
+
+def merge_tags(user_tags, genres):
+    """Merge user_tags and genres, removing duplicates while respecting case sensitivity."""
+    # Convert inputs to lists
+    user_tags_list = convert_to_list(user_tags)
+    genres_list = convert_to_list(genres)
+    
+    # Clean lists by removing None, empty strings, etc.
+    user_tags_list = [tag for tag in user_tags_list if tag and str(tag).strip()]
+    genres_list = [tag for tag in genres_list if tag and str(tag).strip()]
+    
+    # Combine all tags
+    all_tags = user_tags_list + genres_list
+    
+    # Track special cases
+    has_single_player = any(tag == 'Single-player' for tag in all_tags)
+    has_multi_player = any(tag == 'Multi-player' for tag in all_tags)
+    
+    # Remove duplicates while preserving order (first occurrence)
+    seen = set()
+    unique_tags = []
+    
+    for tag in all_tags:
+        # Skip empty tags or special values
+        if not tag or tag in ['Unknown', 'No tags']:
+            continue
+            
+        # Ensure tag is a string
+        if not isinstance(tag, str):
+            tag = str(tag).strip()
+            if not tag:  # Skip if it becomes empty after conversion
+                continue
+            
+        # Handle special cases for Single-player/Singleplayer
+        if tag == 'Singleplayer' and has_single_player:
+            continue
+            
+        # Handle special cases for Multi-player/Multiplayer
+        if tag == 'Multiplayer' and has_multi_player:
+            continue
+            
+        # Only add if we haven't seen this tag before (case sensitive)
+        if tag not in seen:
+            seen.add(tag)
+            unique_tags.append(tag)
+    
+    return unique_tags
+
 # Process single game (reuses details data from check_app_relationship)
 def process_single_game(app_id, app_name):
     """Process a single game and collect all relevant data."""
@@ -758,7 +945,7 @@ def process_single_game(app_id, app_name):
     # Debug logging
     print(f"App {app_id} has {total_review_count} total reviews")
     
-    # MODIFIED: Changed threshold from 200 to 100
+    # Set threshold
     if total_review_count < 100:
         print(f"Skipping app {app_id}: Not enough reviews")
         return None
@@ -830,12 +1017,16 @@ def process_single_game(app_id, app_name):
         # If tags is a list
         elif isinstance(data['tags'], list):
             user_tags.extend([tag.get('description', tag) if isinstance(tag, dict) else tag for tag in data['tags']])
-    
-    # Try to get additional tags from the store page as a fallback
-    if len(user_tags) < 5:
-        store_tags = get_store_page_tags(app_id)
-        if store_tags:
-            user_tags.extend(store_tags)
+
+    # Try to get information store page tags
+    store_tags = get_store_page_tags(app_id)
+    if store_tags:
+        print(f"Found {len(store_tags)} tags from store page for {app_name}")
+        # Add store tags that aren't already in the list
+        for tag in store_tags:
+            if tag not in user_tags:
+                user_tags.append(tag)
+        print(f"Combined unique tags: {len(user_tags)}")
     
     # Remove duplicates while preserving order
     seen = set()
@@ -843,9 +1034,12 @@ def process_single_game(app_id, app_name):
     
     print(f"Found {len(user_tags)} user tags: {', '.join(user_tags[:5])}{'...' if len(user_tags) > 5 else ''}")
     
-    # MODIFIED: Check for required gaming tags
+    # Check for required gaming tags
     required_tags = ['Single-player', 'Singleplayer', 'Multi-player', 'Multiplayer', 
                      'PvP', 'Online PvP', 'Online Co-op']
+    # Merge genres and user_tags to create game_tags
+    game_tags = merge_tags(user_tags, genres)
+    print(f"Created {len(game_tags)} merged game_tags")
     if not any(tag in required_tags for tag in user_tags):
         print(f"Skipping app {app_id}: Missing required gaming tags")
         return None
@@ -991,6 +1185,7 @@ def process_single_game(app_id, app_name):
         'supported_languages': supported_languages,
         'genres': genres if genres else ['Unknown'],  # Ensure non-empty list
         'user_tags': user_tags if user_tags else ['No tags'],  # Ensure non-empty list
+        'game_tags': game_tags,  # Add the merged tags here
         'price_usd': price_usd,
         'price_cny': price_cny,
         'is_free': is_free,
@@ -1043,7 +1238,7 @@ def save_data_for_r(data, base_filename):
         return
     
     # Ensure required columns exist with proper types
-    list_columns = ['developers', 'publishers', 'genres', 'user_tags']
+    list_columns = ['developers', 'publishers', 'genres', 'user_tags', 'game_tags']
     for col in list_columns:
         if col not in df.columns:
             df[col] = df.get(col, [[]]*len(df))  # Empty lists if missing
@@ -1067,13 +1262,9 @@ def save_data_for_r(data, base_filename):
     
     # 2. Save as Feather format preserving list types
     try:
-        # No need to convert list columns to strings - Feather supports lists natively
         # Save directly to feather format
         df.to_feather(f"{base_filename}.feather")
         print(f"Data saved as Feather with native list types: {base_filename}.feather")
-        
-        # Add note about RDS file
-        print(f"Generating RDS file automatically...")
         
         # Create R import script with improved list handling
         with open(f"{base_filename}_import.R", "w", encoding='utf-8') as f:
@@ -1089,26 +1280,50 @@ if (!require("tidyverse")) install.packages("tidyverse")
 library(arrow)
 library(tidyverse)
 
+# Function to safely convert to list
+safe_convert_to_list <- function(x) {{
+  if (is.list(x)) {{
+    return(x)
+  }} else if (is.character(x)) {{
+    tryCatch({{
+      # Handle string representation of lists
+      if (grepl("^\\[.*\\]$", x)) {{
+        # Remove brackets and split
+        items <- gsub("^\\[|\\]$", "", x)
+        items <- strsplit(items, ",\\s*")[[1]]
+        # Remove quotes if present
+        items <- gsub('^\"|\"$', '', items)
+        items <- gsub("^'|'$", "", items)
+        return(as.list(items))
+      }} else {{
+        # Simple comma-separated string
+        items <- strsplit(x, ",\\s*")[[1]]
+        return(as.list(items))
+      }}
+    }}, error = function(e) {{
+      return(list(x))
+    }})
+  }} else {{
+    return(list(x))
+  }}
+}}
+
 tryCatch({{
   # Import from Feather format
   steam_data <- read_feather("{base_filename_forward}.feather")
   
-  # 1. Ensure required columns exist
-  required_columns <- c('developers', 'publishers', 'genres', 'user_tags')
-  for(col in required_columns) {{
-    if(!col %in% names(steam_data)) {{
+  # Convert list columns to proper R lists
+  list_columns <- c('developers', 'publishers', 'genres', 'user_tags', 'game_tags')
+  
+  steam_data <- steam_data %>%
+    mutate(across(any_of(list_columns), ~ map(., safe_convert_to_list)))
+  
+  # Ensure all list columns exist
+  for (col in list_columns) {{
+    if (!col %in% names(steam_data)) {{
       steam_data[[col]] <- list(character(0))
     }}
   }}
-  
-  # 2. Convert columns to proper list types
-  steam_data <- steam_data %>%
-    mutate(
-      developers = map(developers, ~ if(length(.x) > 0) .x else list("Unknown")),
-      publishers = map(publishers, ~ if(length(.x) > 0) .x else list("Unknown")),
-      genres = map(genres, ~ if(length(.x) > 0) .x else list("Unknown")),
-      user_tags = map(user_tags, ~ if(length(.x) > 0) .x else list("No tags"))
-    )
   
   # 3. Save as RDS
   saveRDS(steam_data, file = "{base_filename_forward}.rds")
@@ -1342,6 +1557,318 @@ def press_any_key_to_continue():
     
     print("\nStarting main data collection process...")
 
+def update_existing_games_tags():
+    """
+    Update existing games in the dataset with additional tags from store pages.
+    Using BeautifulSoup with precise selectors for more reliable extraction.
+    Avoids adding semantic duplicates (e.g., 'Single-player' vs 'Singleplayer')
+    and tags that already exist in genres.
+    """
+    print("Starting to update existing games with additional tags...")
+    
+    # Check if results file exists
+    if not os.path.exists(CSV_RESULTS_FILE):
+        print(f"Results file {CSV_RESULTS_FILE} not found.")
+        return False
+    
+    try:
+        # Load existing data
+        df = pd.read_csv(CSV_RESULTS_FILE, encoding='utf-8-sig')
+        print(f"Loaded {len(df)} games from existing dataset.")
+        
+        # Also load JSON data if available
+        existing_results = []
+        if os.path.exists(PROCESSED_GAMES_FILE):
+            try:
+                with open(PROCESSED_GAMES_FILE, 'r', encoding='utf-8') as f:
+                    existing_results = json.load(f)
+                print(f"Loaded {len(existing_results)} games from JSON file.")
+            except Exception as e:
+                print(f"Error loading JSON file: {e}")
+                existing_results = df.to_dict('records')
+        else:
+            existing_results = df.to_dict('records')
+        
+        # Create a mapping for easy lookup
+        game_dict = {str(game.get('app_id')): game for game in existing_results}
+        
+        # Process each game
+        updated_count = 0
+        failed_count = 0
+        
+        # Allow limiting the number of games to process
+        try:
+            process_limit = int(input("Enter number of games to process (0 for all): "))
+        except ValueError:
+            process_limit = 0
+        
+        # Create a sample set of games to test with
+        if process_limit > 0:
+            games_to_process = df.head(process_limit)
+        else:
+            games_to_process = df
+        
+        for index, row in games_to_process.iterrows():
+            app_id = str(row['app_id'])
+            app_name = row['english_name']
+            
+            print(f"\nProcessing {app_name} (App ID: {app_id}) - {index+1}/{len(games_to_process)}")
+            
+            # Get current tags - handle various formats
+            current_tags = []
+            
+            if 'user_tags' in row:
+                # If DataFrame already contains list format
+                if isinstance(row['user_tags'], list):
+                    current_tags = row['user_tags']
+                # If string representation of Python list
+                elif isinstance(row['user_tags'], str) and row['user_tags'].startswith('[') and row['user_tags'].endswith(']'):
+                    try:
+                        import ast
+                        current_tags = ast.literal_eval(row['user_tags'])
+                    except:
+                        try:
+                            current_tags = json.loads(row['user_tags'].replace("'", '"'))
+                        except:
+                            # Simple comma-split approach as fallback
+                            current_tags = [tag.strip() for tag in row['user_tags'].strip('[]').split(',')]
+                # Simple string with commas
+                elif isinstance(row['user_tags'], str):
+                    current_tags = [tag.strip() for tag in row['user_tags'].split(',')]
+            
+            # Get genres - handle various formats
+            genres = []
+            if 'genres' in row:
+                if isinstance(row['genres'], list):
+                    genres = row['genres']
+                elif isinstance(row['genres'], str) and row['genres'].startswith('[') and row['genres'].endswith(']'):
+                    try:
+                        import ast
+                        genres = ast.literal_eval(row['genres'])
+                    except:
+                        try:
+                            genres = json.loads(row['genres'].replace("'", '"'))
+                        except:
+                            # Simple comma-split approach as fallback
+                            genres = [genre.strip() for genre in row['genres'].strip('[]').split(',')]
+                elif isinstance(row['genres'], str):
+                    genres = [genre.strip() for genre in row['genres'].split(',')]
+            
+            # Print current tags
+            print(f"Current tags ({len(current_tags)}): {', '.join(current_tags[:10])}{'...' if len(current_tags) > 10 else ''}")
+            
+            # Get store page tags with the new precise extractor
+            store_tags = get_store_page_tags(app_id)
+            
+            if store_tags:
+                # Check for new tags, avoiding semantic duplicates and genre duplicates
+                new_tags = []
+                skipped_tags = []
+                
+                for tag in store_tags:
+                    # Check if tag is not a semantic duplicate of existing tags or genres
+                    if not is_semantic_duplicate(tag, current_tags) and not is_semantic_duplicate(tag, genres):
+                        current_tags.append(tag)
+                        new_tags.append(tag)
+                    else:
+                        skipped_tags.append(tag)
+                
+                if new_tags:
+                    print(f"✅ Added {len(new_tags)} new tags: {', '.join(new_tags)}")
+                    if skipped_tags:
+                        print(f"⏩ Skipped {len(skipped_tags)} duplicate tags: {', '.join(skipped_tags[:5])}{'...' if len(skipped_tags) > 5 else ''}")
+                    updated_count += 1
+                    
+                    # Update the DataFrame
+                    df.at[index, 'user_tags'] = current_tags
+                    
+                    # Generate merged game_tags
+                    merged_tags = merge_tags(current_tags, genres)
+                    df.at[index, 'game_tags'] = merged_tags
+                    print(f"  Added {len(merged_tags)} merged game_tags")
+
+                    # Update JSON data
+                    if app_id in game_dict:
+                        game_dict[app_id]['user_tags'] = current_tags
+                    
+                    # Update JSON data
+                    if app_id in game_dict:
+                        game_dict[app_id]['game_tags'] = merged_tags
+                        print(f"  Added {len(merged_tags)} merged game_tags")
+                else:
+                    if skipped_tags:
+                        print(f"⏩ All {len(skipped_tags)} tags were duplicates: {', '.join(skipped_tags[:5])}{'...' if len(skipped_tags) > 5 else ''}")
+                    else:
+                        print(f"No new tags found for {app_name}")
+            else:
+                print(f"❌ Failed to get tags for {app_name}")
+                failed_count += 1
+            
+            # Save progress every 10 games
+            if (index + 1) % 10 == 0:
+                print(f"Saving incremental progress...")
+                temp_df = games_to_process.iloc[:index+1].copy()
+                temp_df.to_csv(os.path.join(output_dir, "temp_update.csv"), index=False, encoding='utf-8-sig')
+            
+            # Add delay to avoid rate limiting
+            time.sleep(3.0)
+        
+        # Save final updated data
+        if updated_count > 0:
+            print(f"\nUpdated {updated_count} games with new tags. Failed to get tags for {failed_count} games.")
+            
+            # Update the full dataset with our processed rows
+            if process_limit > 0:
+                # Only update the specific rows we processed
+                for idx in games_to_process.index:
+                    df.loc[idx, 'user_tags'] = games_to_process.loc[idx, 'user_tags']
+            
+            # Save updated DataFrame to CSV
+            df.to_csv(CSV_RESULTS_FILE, index=False, encoding='utf-8-sig')
+            print(f"Saved updated data to {CSV_RESULTS_FILE}")
+            
+            # Save JSON data
+            with open(PROCESSED_GAMES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(list(game_dict.values()), f, ensure_ascii=False, indent=4)
+            print(f"Saved updated JSON data to {PROCESSED_GAMES_FILE}")
+            
+            # Update R files
+            output_file = os.path.join(output_dir, "steam_data")
+            save_data_for_r(list(game_dict.values()), output_file)
+            print(f"Updated R data files at {output_file}")
+            
+            return True
+        else:
+            print(f"\nNo games were updated with new tags. Failed to get tags for {failed_count} games.")
+            return False
+    
+    except Exception as e:
+        print(f"Error updating existing games: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def run_basic_tests():
+    """
+    Run basic tests to verify the essential functionality works before
+    proceeding with the main data collection process.
+    
+    Returns:
+        bool: True if all tests pass, False otherwise
+    """
+    print("\n===== RUNNING BASIC FUNCTIONALITY TESTS =====")
+    tests_passed = 0
+    tests_failed = 0
+    
+    # Test 1: API Connectivity
+    print("\n[Test 1] Testing API connectivity...")
+    try:
+        # Use a simple API endpoint to test connectivity
+        url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+        params = {}
+        response = cached_api_request(url, params)
+        
+        if response and 'applist' in response and 'apps' in response['applist']:
+            print("✅ API connectivity: Success! Retrieved app list.")
+            tests_passed += 1
+        else:
+            print("❌ API connectivity: Failed! Could not retrieve app list.")
+            tests_failed += 1
+    except Exception as e:
+        print(f"❌ API connectivity: Failed with error: {e}")
+        tests_failed += 1
+    
+    # Test 2: Cache Functionality
+    print("\n[Test 2] Testing cache functionality...")
+    try:
+        # Make the same request again - should use cache
+        url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+        params = {}
+        
+        # Clear existing metrics
+        cache_hit = False
+        
+        # Define a simple wrapper to detect cache usage
+        def test_cache_request():
+            nonlocal cache_hit
+            start_time = time.time()
+            result = cached_api_request(url, params)
+            duration = time.time() - start_time
+            
+            # A very fast response likely means cache was used
+            if duration < 0.1:
+                cache_hit = True
+            
+            return result
+        
+        # Make the request again
+        response = test_cache_request()
+        
+        if cache_hit:
+            print("✅ Cache functionality: Success! Cache was properly used.")
+            tests_passed += 1
+        else:
+            print("⚠️ Cache functionality: Warning! Cache might not be working as expected.")
+            # Still consider this a pass if we got a response
+            if response:
+                tests_passed += 1
+            else:
+                tests_failed += 1
+    except Exception as e:
+        print(f"❌ Cache functionality: Failed with error: {e}")
+        tests_failed += 1
+    
+    # Test 3: Key Manager
+    print("\n[Test 3] Testing API key manager...")
+    try:
+        # Get the current key
+        current_key = key_manager.get_current_key()
+        # Record an API call
+        key_manager.record_api_call()
+        # Check if the counter incremented
+        if key_manager.call_counters[current_key] > 0:
+            print("✅ API key manager: Success! Call counter incremented.")
+            tests_passed += 1
+        else:
+            print("❌ API key manager: Failed! Call counter did not increment.")
+            tests_failed += 1
+    except Exception as e:
+        print(f"❌ API key manager: Failed with error: {e}")
+        tests_failed += 1
+    
+    # Test 4: File System Access
+    print("\n[Test 4] Testing file system access...")
+    try:
+        test_file = os.path.join(output_dir, "test_write.txt")
+        # Try to write to a test file
+        with open(test_file, 'w') as f:
+            f.write("Test file write successful")
+        
+        # Try to read it back
+        with open(test_file, 'r') as f:
+            content = f.read()
+        
+        # Delete the test file
+        os.remove(test_file)
+        
+        if content == "Test file write successful":
+            print("✅ File system access: Success! Write and read operations completed.")
+            tests_passed += 1
+        else:
+            print("❌ File system access: Failed! Content mismatch.")
+            tests_failed += 1
+    except Exception as e:
+        print(f"❌ File system access: Failed with error: {e}")
+        tests_failed += 1
+    
+    # Print summary
+    print("\n===== TEST SUMMARY =====")
+    print(f"Tests passed: {tests_passed}/{tests_passed + tests_failed}")
+    print(f"Tests failed: {tests_failed}/{tests_passed + tests_failed}")
+    
+    # Return True if all tests passed
+    return tests_failed == 0
+
 # Main execution block
 if __name__ == "__main__":
     import argparse
@@ -1357,9 +1884,17 @@ if __name__ == "__main__":
     parser.add_argument('--keep-cache', action='store_true', help='Keep existing cache for the app ID')
     parser.add_argument('--quiet', action='store_true', help='Disable verbose logging')
     parser.add_argument('--deduplicate', action='store_true', help='Deduplicate the CSV file without processing games')
+    parser.add_argument('--update-tags', action='store_true', help='Update existing games with additional tags from store pages')
+    parser.add_argument('--skip-tests', action='store_true', help='Skip initial functionality tests')
     
     # Parse arguments
     args = parser.parse_args()
+    # Handle the update-tags option
+    if args.update_tags:
+        print("Updating existing games with additional tags...")
+        update_existing_games_tags()
+        sys.exit(0)
+    
     
     # Handle the deduplicate option first
     if args.deduplicate:
@@ -1420,7 +1955,11 @@ if __name__ == "__main__":
     
     # Regular execution flow for batch processing
     # Run the test function first to verify everything works
-    test_successful = True  # Assume test passes for this update
+    test_successful = True
+    if not args.skip_tests:
+        test_successful = run_basic_tests()
+    else:
+        print("Skipping initial functionality tests as requested...")
     
     if test_successful:
         # Add pause and wait for user confirmation before continuing

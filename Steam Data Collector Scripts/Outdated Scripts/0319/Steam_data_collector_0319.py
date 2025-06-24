@@ -3,7 +3,6 @@ import time
 import json
 import pandas as pd
 from datetime import datetime
-import ast
 import os
 import pickle
 import re
@@ -365,13 +364,13 @@ def deduplicate_csv_file(csv_path):
         print(f"Error deduplicating CSV: {e}")
         return False
 
-# Initialise results file
+# Initialize results file
 def initialise_results_file(output_path):
     """Initialize CSV file with headers for incremental writing."""
     # Define all possible headers (complete set for your data)
     headers = [
         'app_id', 'english_name', 'chinese_name', 'developers', 'publishers',
-        'release_date', 'supported_languages', 'genres', 'user_tags', 'game_tags',
+        'release_date', 'supported_languages', 'genres', 'user_tags',
         'price_usd', 'price_cny', 'is_free', 'current_player_count',
         'chinese_simplified_interface_subtitles', 'chinese_simplified_audio',
         'chinese_traditional_interface_subtitles', 'chinese_traditional_audio',
@@ -683,6 +682,7 @@ def get_all_games():
     
     print(f"Total apps from Steam API: {len(all_apps)}")
     
+    # Simple filtering - just return all apps for now
     # Detailed filtering will be done in process_single_game
     filtered_apps = all_apps
     
@@ -844,95 +844,6 @@ def is_semantic_duplicate(new_tag, existing_tags):
     
     return normalized_new in normalized_existing
 
-def convert_to_list(tags_data):
-    """Convert various tag formats to a proper list."""
-    if not tags_data or pd.isna(tags_data) or tags_data == '':
-        return []
-        
-    if isinstance(tags_data, list):
-        return tags_data
-        
-    if isinstance(tags_data, str):
-        # Check if it's a string representation of a list
-        if tags_data.startswith('[') and tags_data.endswith(']'):
-            # Remove any quotes around the entire string if present
-            tags_data = tags_data.strip('"\'')
-            
-            try:
-                # First try ast.literal_eval which is safer than eval
-                return ast.literal_eval(tags_data)
-            except (SyntaxError, ValueError) as e:
-                # Try JSON parse with proper quote handling
-                try:
-                    # Replace single quotes with double quotes for JSON compatibility
-                    json_str = tags_data.replace("'", '"')
-                    return json.loads(json_str)
-                except json.JSONDecodeError:
-                    # Fallback to simple string parsing
-                    clean_str = tags_data.strip('[]')
-                    # Handle quoted items in the list
-                    if '"' in clean_str or "'" in clean_str:
-                        # This is a complex string with quotes - try regex approach
-                        import re
-                        pattern = r'\'([^\']*?)\'|"([^"]*?)"|([\w\s\-\.]+)'
-                        matches = re.findall(pattern, clean_str)
-                        return [next(s for s in match if s) for match in matches]
-                    else:
-                        # Simple comma-separated values
-                        return [tag.strip() for tag in clean_str.split(',')]
-        else:
-            # Just a plain comma-separated string
-            return [tag.strip() for tag in tags_data.split(',')]
-    
-    return []
-
-def merge_tags(user_tags, genres):
-    """Merge user_tags and genres, removing duplicates while respecting case sensitivity."""
-    # Convert inputs to lists
-    user_tags_list = convert_to_list(user_tags)
-    genres_list = convert_to_list(genres)
-    
-    # Clean lists by removing None, empty strings, etc.
-    user_tags_list = [tag for tag in user_tags_list if tag and str(tag).strip()]
-    genres_list = [tag for tag in genres_list if tag and str(tag).strip()]
-    
-    # Combine all tags
-    all_tags = user_tags_list + genres_list
-    
-    # Track special cases
-    has_single_player = any(tag == 'Single-player' for tag in all_tags)
-    has_multi_player = any(tag == 'Multi-player' for tag in all_tags)
-    
-    # Remove duplicates while preserving order (first occurrence)
-    seen = set()
-    unique_tags = []
-    
-    for tag in all_tags:
-        # Skip empty tags or special values
-        if not tag or tag in ['Unknown', 'No tags']:
-            continue
-            
-        # Ensure tag is a string
-        if not isinstance(tag, str):
-            tag = str(tag).strip()
-            if not tag:  # Skip if it becomes empty after conversion
-                continue
-            
-        # Handle special cases for Single-player/Singleplayer
-        if tag == 'Singleplayer' and has_single_player:
-            continue
-            
-        # Handle special cases for Multi-player/Multiplayer
-        if tag == 'Multiplayer' and has_multi_player:
-            continue
-            
-        # Only add if we haven't seen this tag before (case sensitive)
-        if tag not in seen:
-            seen.add(tag)
-            unique_tags.append(tag)
-    
-    return unique_tags
-
 # Process single game (reuses details data from check_app_relationship)
 def process_single_game(app_id, app_name):
     """Process a single game and collect all relevant data."""
@@ -945,7 +856,7 @@ def process_single_game(app_id, app_name):
     # Debug logging
     print(f"App {app_id} has {total_review_count} total reviews")
     
-    # Set threshold
+    # MODIFIED: Changed threshold from 200 to 100
     if total_review_count < 100:
         print(f"Skipping app {app_id}: Not enough reviews")
         return None
@@ -1018,7 +929,7 @@ def process_single_game(app_id, app_name):
         elif isinstance(data['tags'], list):
             user_tags.extend([tag.get('description', tag) if isinstance(tag, dict) else tag for tag in data['tags']])
 
-    # Try to get information store page tags
+    # CHANGED: Always try to get store page tags, not just when API returns few tags
     store_tags = get_store_page_tags(app_id)
     if store_tags:
         print(f"Found {len(store_tags)} tags from store page for {app_name}")
@@ -1034,12 +945,9 @@ def process_single_game(app_id, app_name):
     
     print(f"Found {len(user_tags)} user tags: {', '.join(user_tags[:5])}{'...' if len(user_tags) > 5 else ''}")
     
-    # Check for required gaming tags
+    # MODIFIED: Check for required gaming tags
     required_tags = ['Single-player', 'Singleplayer', 'Multi-player', 'Multiplayer', 
                      'PvP', 'Online PvP', 'Online Co-op']
-    # Merge genres and user_tags to create game_tags
-    game_tags = merge_tags(user_tags, genres)
-    print(f"Created {len(game_tags)} merged game_tags")
     if not any(tag in required_tags for tag in user_tags):
         print(f"Skipping app {app_id}: Missing required gaming tags")
         return None
@@ -1185,7 +1093,6 @@ def process_single_game(app_id, app_name):
         'supported_languages': supported_languages,
         'genres': genres if genres else ['Unknown'],  # Ensure non-empty list
         'user_tags': user_tags if user_tags else ['No tags'],  # Ensure non-empty list
-        'game_tags': game_tags,  # Add the merged tags here
         'price_usd': price_usd,
         'price_cny': price_cny,
         'is_free': is_free,
@@ -1662,19 +1569,9 @@ def update_existing_games_tags():
                     # Update the DataFrame
                     df.at[index, 'user_tags'] = current_tags
                     
-                    # Generate merged game_tags
-                    merged_tags = merge_tags(current_tags, genres)
-                    df.at[index, 'game_tags'] = merged_tags
-                    print(f"  Added {len(merged_tags)} merged game_tags")
-
                     # Update JSON data
                     if app_id in game_dict:
                         game_dict[app_id]['user_tags'] = current_tags
-                    
-                    # Update JSON data
-                    if app_id in game_dict:
-                        game_dict[app_id]['game_tags'] = merged_tags
-                        print(f"  Added {len(merged_tags)} merged game_tags")
                 else:
                     if skipped_tags:
                         print(f"⏩ All {len(skipped_tags)} tags were duplicates: {', '.join(skipped_tags[:5])}{'...' if len(skipped_tags) > 5 else ''}")
@@ -1728,127 +1625,6 @@ def update_existing_games_tags():
         traceback.print_exc()
         return False
 
-def run_basic_tests():
-    """
-    Run basic tests to verify the essential functionality works before
-    proceeding with the main data collection process.
-    
-    Returns:
-        bool: True if all tests pass, False otherwise
-    """
-    print("\n===== RUNNING BASIC FUNCTIONALITY TESTS =====")
-    tests_passed = 0
-    tests_failed = 0
-    
-    # Test 1: API Connectivity
-    print("\n[Test 1] Testing API connectivity...")
-    try:
-        # Use a simple API endpoint to test connectivity
-        url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
-        params = {}
-        response = cached_api_request(url, params)
-        
-        if response and 'applist' in response and 'apps' in response['applist']:
-            print("✅ API connectivity: Success! Retrieved app list.")
-            tests_passed += 1
-        else:
-            print("❌ API connectivity: Failed! Could not retrieve app list.")
-            tests_failed += 1
-    except Exception as e:
-        print(f"❌ API connectivity: Failed with error: {e}")
-        tests_failed += 1
-    
-    # Test 2: Cache Functionality
-    print("\n[Test 2] Testing cache functionality...")
-    try:
-        # Make the same request again - should use cache
-        url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
-        params = {}
-        
-        # Clear existing metrics
-        cache_hit = False
-        
-        # Define a simple wrapper to detect cache usage
-        def test_cache_request():
-            nonlocal cache_hit
-            start_time = time.time()
-            result = cached_api_request(url, params)
-            duration = time.time() - start_time
-            
-            # A very fast response likely means cache was used
-            if duration < 0.1:
-                cache_hit = True
-            
-            return result
-        
-        # Make the request again
-        response = test_cache_request()
-        
-        if cache_hit:
-            print("✅ Cache functionality: Success! Cache was properly used.")
-            tests_passed += 1
-        else:
-            print("⚠️ Cache functionality: Warning! Cache might not be working as expected.")
-            # Still consider this a pass if we got a response
-            if response:
-                tests_passed += 1
-            else:
-                tests_failed += 1
-    except Exception as e:
-        print(f"❌ Cache functionality: Failed with error: {e}")
-        tests_failed += 1
-    
-    # Test 3: Key Manager
-    print("\n[Test 3] Testing API key manager...")
-    try:
-        # Get the current key
-        current_key = key_manager.get_current_key()
-        # Record an API call
-        key_manager.record_api_call()
-        # Check if the counter incremented
-        if key_manager.call_counters[current_key] > 0:
-            print("✅ API key manager: Success! Call counter incremented.")
-            tests_passed += 1
-        else:
-            print("❌ API key manager: Failed! Call counter did not increment.")
-            tests_failed += 1
-    except Exception as e:
-        print(f"❌ API key manager: Failed with error: {e}")
-        tests_failed += 1
-    
-    # Test 4: File System Access
-    print("\n[Test 4] Testing file system access...")
-    try:
-        test_file = os.path.join(output_dir, "test_write.txt")
-        # Try to write to a test file
-        with open(test_file, 'w') as f:
-            f.write("Test file write successful")
-        
-        # Try to read it back
-        with open(test_file, 'r') as f:
-            content = f.read()
-        
-        # Delete the test file
-        os.remove(test_file)
-        
-        if content == "Test file write successful":
-            print("✅ File system access: Success! Write and read operations completed.")
-            tests_passed += 1
-        else:
-            print("❌ File system access: Failed! Content mismatch.")
-            tests_failed += 1
-    except Exception as e:
-        print(f"❌ File system access: Failed with error: {e}")
-        tests_failed += 1
-    
-    # Print summary
-    print("\n===== TEST SUMMARY =====")
-    print(f"Tests passed: {tests_passed}/{tests_passed + tests_failed}")
-    print(f"Tests failed: {tests_failed}/{tests_passed + tests_failed}")
-    
-    # Return True if all tests passed
-    return tests_failed == 0
-
 # Main execution block
 if __name__ == "__main__":
     import argparse
@@ -1865,7 +1641,6 @@ if __name__ == "__main__":
     parser.add_argument('--quiet', action='store_true', help='Disable verbose logging')
     parser.add_argument('--deduplicate', action='store_true', help='Deduplicate the CSV file without processing games')
     parser.add_argument('--update-tags', action='store_true', help='Update existing games with additional tags from store pages')
-    parser.add_argument('--skip-tests', action='store_true', help='Skip initial functionality tests')
     
     # Parse arguments
     args = parser.parse_args()
@@ -1935,11 +1710,7 @@ if __name__ == "__main__":
     
     # Regular execution flow for batch processing
     # Run the test function first to verify everything works
-    test_successful = True
-    if not args.skip_tests:
-        test_successful = run_basic_tests()
-    else:
-        print("Skipping initial functionality tests as requested...")
+    test_successful = True  # Assume test passes for this update
     
     if test_successful:
         # Add pause and wait for user confirmation before continuing

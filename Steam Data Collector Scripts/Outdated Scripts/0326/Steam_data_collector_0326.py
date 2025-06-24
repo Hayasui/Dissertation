@@ -17,9 +17,9 @@ from bs4 import BeautifulSoup
 
 # Define multiple API keys
 API_KEYS = [
-    "K1",          # Key 1
-    "K2",          # Key 2
-    "K3"           # Key 3
+    "x",          # Key 1
+    "x",          # Key 2
+    "x"           # Key 3
 ]
 
 # Create output directory
@@ -33,7 +33,7 @@ if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
 
 # Set path to R executable
-RSCRIPT_PATH = r"C:\PROGRA~1\R\R-44~1.3\bin\x64\Rscript.exe"
+RSCRIPT_PATH = r"D:\Software\R-4.5.0\bin\x64\Rscript.exe"
 
 # Checkpoint file to track progress
 CHECKPOINT_FILE = os.path.join(output_dir, "checkpoint.pkl")
