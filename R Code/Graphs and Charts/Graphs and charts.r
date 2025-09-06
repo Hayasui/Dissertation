@@ -740,7 +740,8 @@ regression_data <- regression_data %>%
     # Create text-heavy game indicator
     has_story_rich = as.numeric(grepl("Story Rich", game_tags, ignore.case = TRUE)),
     has_visual_novel = as.numeric(grepl("Visual Novel", game_tags, ignore.case = TRUE)),
-    text_heavy_game = as.numeric(has_story_rich == 1 | has_visual_novel == 1),
+    has_text_based = as.numeric(grepl("Text-Based", game_tags, ignore.case = TRUE)),
+    text_heavy_game = as.numeric(has_story_rich == 1 | has_visual_novel == 1 | has_text_based == 1),
     
     # Create release year as factor for fixed effects
     release_year = factor(release_year),
@@ -1230,7 +1231,7 @@ cat("   Non-indie games:", format(fa_games - indie_games, big.mark = ","),
 # 5. Text-heavy games
 text_heavy_games <- sum(regression_data$text_heavy_game == 1, na.rm = TRUE)
 text_heavy_percentage <- round((text_heavy_games / fa_games) * 100, 2)
-cat("5. TEXT-HEAVY GAMES (Story Rich or Visual Novel)\n")
+cat("5. TEXT-HEAVY GAMES (Story Rich, Visual Novel or Text-Based)\n")
 cat("   Text-heavy games:", format(text_heavy_games, big.mark = ","), 
     " (", text_heavy_percentage, "% of FA subset)\n")
 cat("   Non text-heavy games:", format(fa_games - text_heavy_games, big.mark = ","), 
@@ -1464,3 +1465,670 @@ cat("- 01_main_statistics_summary.csv\n")
 cat("- 02_games_by_year_summary.csv\n")
 cat("- 03_games_by_cny_price_summary.csv\n")
 cat("- 04_games_by_localisation_summary.csv\n")
+
+# Calculate descriptive statistics for both dependent variables
+dependent_vars_stats <- regression_data %>%
+  summarise(
+    # For SC Review Proportion (using the original ratio, not adjusted)
+    SC_Proportion_Mean = round(mean(sc_ratio, na.rm = TRUE), 3),
+    SC_Proportion_SD = round(sd(sc_ratio, na.rm = TRUE), 3),
+    SC_Proportion_Min = round(min(sc_ratio, na.rm = TRUE), 3),
+    SC_Proportion_Max = round(max(sc_ratio, na.rm = TRUE), 3),
+    SC_Proportion_Q1 = round(quantile(sc_ratio, 0.25, na.rm = TRUE), 3),
+    SC_Proportion_Median = round(quantile(sc_ratio, 0.50, na.rm = TRUE), 3),
+    SC_Proportion_Q3 = round(quantile(sc_ratio, 0.75, na.rm = TRUE), 3),
+    
+    # For Sentiment Gap (multiply by 100 to show as percentage points)
+    Sentiment_Gap_Mean = round(mean(sentiment_gap * 100, na.rm = TRUE), 2),
+    Sentiment_Gap_SD = round(sd(sentiment_gap * 100, na.rm = TRUE), 2),
+    Sentiment_Gap_Min = round(min(sentiment_gap * 100, na.rm = TRUE), 2),
+    Sentiment_Gap_Max = round(max(sentiment_gap * 100, na.rm = TRUE), 2),
+    Sentiment_Gap_Q1 = round(quantile(sentiment_gap * 100, 0.25, na.rm = TRUE), 2),
+    Sentiment_Gap_Median = round(quantile(sentiment_gap * 100, 0.50, na.rm = TRUE), 2),
+    Sentiment_Gap_Q3 = round(quantile(sentiment_gap * 100, 0.75, na.rm = TRUE), 2)
+  )
+
+# Create a formatted table for the dissertation
+descriptive_stats_table <- data.frame(
+  Variable = c("SC Review Proportion", "Sentiment Gap (%)"),
+  N = c(
+    sum(!is.na(regression_data$sc_ratio)),
+    sum(!is.na(regression_data$sentiment_gap))
+  ),
+  Mean = c(
+    dependent_vars_stats$SC_Proportion_Mean,
+    dependent_vars_stats$Sentiment_Gap_Mean
+  ),
+  SD = c(
+    dependent_vars_stats$SC_Proportion_SD,
+    dependent_vars_stats$Sentiment_Gap_SD
+  ),
+  Min = c(
+    dependent_vars_stats$SC_Proportion_Min,
+    dependent_vars_stats$Sentiment_Gap_Min
+  ),
+  `25th Pctl` = c(
+    dependent_vars_stats$SC_Proportion_Q1,
+    dependent_vars_stats$Sentiment_Gap_Q1
+  ),
+  Median = c(
+    dependent_vars_stats$SC_Proportion_Median,
+    dependent_vars_stats$Sentiment_Gap_Median
+  ),
+  `75th Pctl` = c(
+    dependent_vars_stats$SC_Proportion_Q3,
+    dependent_vars_stats$Sentiment_Gap_Q3
+  ),
+  Max = c(
+    dependent_vars_stats$SC_Proportion_Max,
+    dependent_vars_stats$Sentiment_Gap_Max
+  )
+)
+
+# Rename columns for cleaner output
+names(descriptive_stats_table) <- c("Variable", "N", "Mean", "SD", "Min", "25th Pctl", "Median", "75th Pctl", "Max")
+
+# Display the table
+cat("\n=== DESCRIPTIVE STATISTICS FOR DEPENDENT VARIABLES ===\n\n")
+print(descriptive_stats_table, row.names = FALSE)
+
+# Save to CSV for easy inclusion in dissertation
+write.csv(descriptive_stats_table, "dependent_variables_descriptive_stats.csv", row.names = FALSE)
+
+# Calculate additional context for interpretation
+cat("\n=== ADDITIONAL CONTEXT FOR INTERPRETATION ===\n")
+cat("For Sentiment Gap:\n")
+cat("- Standard Deviation:", round(dependent_vars_stats$Sentiment_Gap_SD, 2), "percentage points\n")
+cat("- Range:", round(dependent_vars_stats$Sentiment_Gap_Max - dependent_vars_stats$Sentiment_Gap_Min, 2), "percentage points\n")
+cat("- IQR:", round(dependent_vars_stats$Sentiment_Gap_Q3 - dependent_vars_stats$Sentiment_Gap_Q1, 2), "percentage points\n")
+cat("- Coefficient of 0.01 represents:", round((0.01 * 100) / dependent_vars_stats$Sentiment_Gap_SD * 100, 2), "% of one SD\n")
+cat("- Coefficient of 0.01 represents:", round((0.01 * 100) / (dependent_vars_stats$Sentiment_Gap_Max - dependent_vars_stats$Sentiment_Gap_Min) * 100, 2), "% of the range\n")
+
+# Create a more detailed breakdown by localisation category
+cat("\n=== DEPENDENT VARIABLES BY LOCALISATION CATEGORY ===\n\n")
+
+stats_by_localisation <- regression_data %>%
+  group_by(full_localisation_combo) %>%
+  summarise(
+    n = n(),
+    # SC Review Proportion
+    SC_Prop_Mean = round(mean(sc_ratio, na.rm = TRUE), 3),
+    SC_Prop_SD = round(sd(sc_ratio, na.rm = TRUE), 3),
+    # Sentiment Gap (as percentage)
+    Sentiment_Mean = round(mean(sentiment_gap * 100, na.rm = TRUE), 2),
+    Sentiment_SD = round(sd(sentiment_gap * 100, na.rm = TRUE), 2),
+    .groups = "drop"
+  ) %>%
+  arrange(full_localisation_combo)
+
+print(stats_by_localisation)
+
+
+# Histogram for SC Review Proportion
+p_sc_prop <- ggplot(regression_data, aes(x = sc_ratio)) +
+  geom_histogram(bins = 50, fill = primary_strong_accent, color = "white", alpha = 0.8) +
+  geom_vline(aes(xintercept = mean(sc_ratio, na.rm = TRUE)), 
+             color = primary_very_dark_accent, linetype = "dashed", size = 1) +
+  labs(
+    title = "Distribution of SC Review Proportion",
+    subtitle = paste("Mean =", round(mean(regression_data$sc_ratio, na.rm = TRUE), 3),
+                     "| SD =", round(sd(regression_data$sc_ratio, na.rm = TRUE), 3)),
+    x = "Proportion of SC Reviews",
+    y = "Number of Games"
+  ) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  my_theme
+
+# Histogram for Sentiment Gap
+p_sentiment <- ggplot(regression_data, aes(x = sentiment_gap * 100)) +
+  geom_histogram(bins = 50, fill = primary_strong_accent, color = "white", alpha = 0.8) +
+  geom_vline(aes(xintercept = mean(sentiment_gap * 100, na.rm = TRUE)), 
+             color = primary_very_dark_accent, linetype = "dashed", size = 1) +
+  geom_vline(xintercept = 0, color = "black", linetype = "solid", size = 0.5) +
+  labs(
+    title = "Distribution of Sentiment Gap",
+    subtitle = paste("Mean =", round(mean(regression_data$sentiment_gap * 100, na.rm = TRUE), 2),
+                     "| SD =", round(sd(regression_data$sentiment_gap * 100, na.rm = TRUE), 2)),
+    x = "Sentiment Gap (SC - English, in percentage points)",
+    y = "Number of Games"
+  ) +
+  annotate("text", x = -30, y = 800, label = "SC more negative", color = "red", size = 3) +
+  annotate("text", x = 20, y = 800, label = "SC more positive", color = "darkgreen", size = 3) +
+  my_theme
+
+# Combine plots
+combined_histograms <- grid.arrange(p_sc_prop, p_sentiment, ncol = 1)
+
+# Save the visualization
+ggsave("dependent_variables_distributions.png", combined_histograms, width = 10, height = 10, dpi = 300)
+
+# Create a LaTeX-ready table using xtable (optional)
+if(require(xtable, quietly = TRUE)) {
+  latex_table <- xtable(descriptive_stats_table, 
+                        caption = "Descriptive Statistics for Dependent Variables",
+                        label = "tab:dep_var_stats")
+  print(latex_table, include.rownames = FALSE, 
+        file = "dependent_variables_stats_latex.tex")
+  cat("\nLaTeX table saved to 'dependent_variables_stats_latex.tex'\n")
+}
+
+cat("\n=== DESCRIPTIVE STATISTICS GENERATION COMPLETE ===\n")
+cat("Files created:\n")
+cat("- dependent_variables_descriptive_stats.csv\n")
+cat("- dependent_variables_distributions.png\n")
+cat("- dependent_variables_stats_latex.tex (if xtable installed)\n")
+
+# --- Extract Model Coefficients ---
+
+# Get coefficients from Model 3 (Beta Regression)
+model3_coef <- coef(model3)
+cat("Model 3 Coefficients (relevant to interaction):\n")
+text_year3_coef <- model3_coef["full_localisation_comboText Only:release_year_centered_cubed"]
+cat("Text Localisation × Year³ coefficient:", round(text_year3_coef, 6), "\n\n")
+
+# Get coefficients from Model 4 (Linear Model) 
+model4_coef <- coef(model4)
+cat("Model 4 Coefficients (relevant to interactions):\n")
+audio_text_year_coef <- model4_coef["full_localisation_comboAudio + Text:release_year_centered"]
+text_year_coef <- model4_coef["full_localisation_comboText Only:release_year_centered"] 
+audio_text_year2_coef <- model4_coef["full_localisation_comboAudio + Text:release_year_centered_squared"]
+audio_text_year3_coef <- model4_coef["full_localisation_comboAudio + Text:release_year_centered_cubed"]
+
+cat("Audio + Text × Year coefficient:", round(audio_text_year_coef, 6), "\n")
+cat("Text Only × Year coefficient:", round(text_year_coef, 6), "\n")
+cat("Audio + Text × Year² coefficient:", round(audio_text_year2_coef, 6), "\n")
+cat("Audio + Text × Year³ coefficient:", round(audio_text_year3_coef, 6), "\n\n")
+
+# --- Setup Time Range and Centering ---
+
+# Use 2010-2025 as requested
+years <- 2010:2025
+mean_release_year <- mean(regression_data$release_year_numeric, na.rm = TRUE)
+years_centered <- years - mean_release_year
+years_centered_sq <- years_centered^2
+years_centered_cubed <- years_centered^3
+
+cat("Mean release year for centering:", round(mean_release_year, 2), "\n")
+cat("Year range:", min(years), "to", max(years), "\n")
+cat("Centered year range:", round(min(years_centered), 2), "to", round(max(years_centered), 2), "\n\n")
+
+# --- Model 3: Text Localisation × Year³ Interaction Effect ---
+
+# Calculate the interaction effect over time
+model3_data <- data.frame(
+  year = years,
+  year_centered_cubed = years_centered_cubed,
+  interaction_effect = text_year3_coef * years_centered_cubed
+)
+
+# Create Model 3 plot
+p_model3 <- ggplot(model3_data, aes(x = year, y = interaction_effect)) +
+  geom_line(color = main_focus_color, linewidth = 1.2) +
+  geom_point(color = main_focus_color, size = 2) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed", alpha = 0.7) +
+  labs(
+    title = "Model 3: Text Localisation × Year³ Interaction Effect Over Time",
+    subtitle = "Effect of Text Localisation on SC Review Proportion (Log-Odds Scale)",
+    x = "Release Year",
+    y = "Interaction Effect (Log-Odds)"
+  ) +
+  scale_x_continuous(
+    breaks = seq(2010, 2025, by = 2),
+    limits = c(2009.5, 2025.5)
+  ) +
+  my_theme +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# --- Model 4: Multiple Interaction Effects ---
+
+# Calculate all interaction effects over time
+model4_data <- data.frame(
+  year = rep(years, 4),
+  interaction_type = rep(c("Audio + Text × Year", "Text Only × Year", 
+                           "Audio + Text × Year²", "Audio + Text × Year³"), each = length(years)),
+  year_centered = rep(years_centered, 4),
+  year_centered_sq = rep(years_centered_sq, 4),
+  year_centered_cubed = rep(years_centered_cubed, 4)
+) %>%
+  mutate(
+    interaction_effect = case_when(
+      interaction_type == "Audio + Text × Year" ~ audio_text_year_coef * year_centered,
+      interaction_type == "Text Only × Year" ~ text_year_coef * year_centered,
+      interaction_type == "Audio + Text × Year²" ~ audio_text_year2_coef * year_centered_sq,
+      interaction_type == "Audio + Text × Year³" ~ audio_text_year3_coef * year_centered_cubed
+    ),
+    # Convert to percentage points for sentiment gap
+    interaction_effect = interaction_effect * 100
+  )
+
+# Create Model 4 plot
+p_model4 <- ggplot(model4_data, aes(x = year, y = interaction_effect, 
+                                    color = interaction_type, linetype = interaction_type)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed", alpha = 0.7) +
+  scale_color_manual(
+    name = "Interaction Effect",
+    values = c("Audio + Text × Year" = main_focus_color,
+               "Text Only × Year" = secondary_focus_color,
+               "Audio + Text × Year²" = primary_dark_accent,
+               "Audio + Text × Year³" = primary_very_dark_accent)
+  ) +
+  scale_linetype_manual(
+    name = "Interaction Effect", 
+    values = c("Audio + Text × Year" = "solid",
+               "Text Only × Year" = "longdash", 
+               "Audio + Text × Year²" = "dashed",
+               "Audio + Text × Year³" = "dotdash")
+  ) +
+  labs(
+    title = "Model 4: Multiple Localisation × Year Interaction Effects Over Time",
+    subtitle = "Effects of Different Localisation Types on Sentiment Gap (Percentage Points)",
+    x = "Release Year",
+    y = "Interaction Effect (Percentage Points)"
+  ) +
+  scale_x_continuous(
+    breaks = seq(2010, 2025, by = 2),
+    limits = c(2009.5, 2025.5)
+  ) +
+  my_theme +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+# --- Save Plots ---
+
+ggsave("model3_text_year3_interaction_effect.png", p_model3, 
+       width = 10, height = 6, dpi = 300)
+
+ggsave("model4_multiple_interaction_effects.png", p_model4, 
+       width = 12, height = 6, dpi = 300)
+
+# Create combined plot
+combined_interaction_effects <- grid.arrange(p_model3, p_model4, ncol = 1)
+
+ggsave("combined_interaction_effects_models3_4.png", combined_interaction_effects, 
+       width = 12, height = 12, dpi = 300)
+
+# --- Print Summary Information ---
+cat("\n=== INTERACTION EFFECT PLOTS SUMMARY ===\n")
+
+cat("Model 3 (Beta Regression - Log-Odds Scale):\n")
+cat("  - Shows: Text Localisation × Year³ interaction effect\n")
+cat("  - Effect range:", round(min(model3_data$interaction_effect), 4), "to", 
+    round(max(model3_data$interaction_effect), 4), "\n")
+cat("  - Peak effect year:", years[which.max(abs(model3_data$interaction_effect))], "\n")
+cat("  - Peak effect magnitude:", round(max(abs(model3_data$interaction_effect)), 4), "\n\n")
+
+cat("Model 4 (Linear Model - Percentage Points):\n")
+for(effect_type in unique(model4_data$interaction_type)) {
+  effect_data <- filter(model4_data, interaction_type == effect_type)
+  cat("  -", effect_type, ":\n")
+  cat("    Range:", round(min(effect_data$interaction_effect), 3), "to", 
+      round(max(effect_data$interaction_effect), 3), "pp\n")
+  cat("    Peak year:", years[which.max(abs(effect_data$interaction_effect))], "\n")
+  cat("    Peak magnitude:", round(max(abs(effect_data$interaction_effect)), 3), "pp\n")
+}
+
+# Show the actual values at key years for interpretation
+cat("\nModel 3 Effect at Key Years:\n")
+key_years <- c(2010, 2015, 2020, 2025)
+key_data_m3 <- model3_data %>% 
+  filter(year %in% key_years) %>%
+  select(year, interaction_effect) %>%
+  mutate(interaction_effect = round(interaction_effect, 4))
+print(key_data_m3)
+
+cat("\nModel 4 Effects at Key Years:\n")
+key_data_m4 <- model4_data %>% 
+  filter(year %in% key_years) %>%
+  select(year, interaction_type, interaction_effect) %>%
+  mutate(interaction_effect = round(interaction_effect, 3)) %>%
+  tidyr::pivot_wider(names_from = interaction_type, values_from = interaction_effect)
+print(key_data_m4)
+
+cat("\n=== INTERACTION EFFECT PLOTS GENERATED SUCCESSFULLY ===\n")
+cat("Files created:\n")
+cat("- model3_text_year3_interaction_effect.png\n")
+cat("- model4_multiple_interaction_effects.png\n")
+cat("- combined_interaction_effects_models3_4.png\n")
+
+
+# --- Extract Interaction Coefficients for Text-Heavy Models ---
+
+# Get coefficients from Model 5 (Beta Regression)
+model5_coef <- coef(model5)
+cat("Model 5 Coefficients (interaction effects):\n")
+
+# Extract the significant interaction coefficients
+audio_text_textheavy_coef <- model5_coef["full_localisation_comboAudio + Text:text_heavy_game"]
+text_only_textheavy_coef <- model5_coef["full_localisation_comboText Only:text_heavy_game"]
+
+cat("Audio + Text × Text Heavy coefficient:", round(audio_text_textheavy_coef, 6), "\n")
+cat("Text Only × Text Heavy coefficient:", round(text_only_textheavy_coef, 6), "\n\n")
+
+# Get coefficients from Model 6 (Linear Model)
+model6_coef <- coef(model6)
+cat("Model 6 Coefficients (interaction effects):\n")
+
+# Extract the significant interaction coefficients
+audio_text_textheavy_coef_m6 <- model6_coef["full_localisation_comboAudio + Text:text_heavy_game"]
+text_only_textheavy_coef_m6 <- model6_coef["full_localisation_comboText Only:text_heavy_game"]
+
+cat("Audio + Text × Text Heavy coefficient:", round(audio_text_textheavy_coef_m6, 6), "\n")
+cat("Text Only × Text Heavy coefficient:", round(text_only_textheavy_coef_m6, 6), "\n\n")
+
+# --- Create Data for Model 5 Interaction Plot ---
+
+model5_interaction_data <- data.frame(
+  interaction_type = c("Audio + Text × Text Heavy", "Text Only × Text Heavy"),
+  coefficient = c(audio_text_textheavy_coef, text_only_textheavy_coef),
+  model = "Model 5 (Beta Regression)"
+)
+
+# Get standard errors for confidence intervals (if available)
+model5_summary <- summary(model5)
+model5_se <- model5_summary$coefficients$mean[, "Std. Error"]
+
+# Extract standard errors for our interaction terms
+audio_text_textheavy_se <- model5_se["full_localisation_comboAudio + Text:text_heavy_game"]
+text_only_textheavy_se <- model5_se["full_localisation_comboText Only:text_heavy_game"]
+
+model5_interaction_data$std_error <- c(audio_text_textheavy_se, text_only_textheavy_se)
+model5_interaction_data$ci_lower <- model5_interaction_data$coefficient - 1.96 * model5_interaction_data$std_error
+model5_interaction_data$ci_upper <- model5_interaction_data$coefficient + 1.96 * model5_interaction_data$std_error
+
+# --- Create Data for Model 6 Interaction Plot ---
+
+model6_interaction_data <- data.frame(
+  interaction_type = c("Audio + Text × Text Heavy", "Text Only × Text Heavy"),
+  coefficient = c(audio_text_textheavy_coef_m6, text_only_textheavy_coef_m6) * 100, # Convert to percentage points
+  model = "Model 6 (WLS Linear)"
+)
+
+# Get standard errors for Model 6
+model6_summary <- summary(model6)
+model6_se <- model6_summary$coefficients[, "Std. Error"]
+
+# Extract standard errors for our interaction terms
+audio_text_textheavy_se_m6 <- model6_se["full_localisation_comboAudio + Text:text_heavy_game"]
+text_only_textheavy_se_m6 <- model6_se["full_localisation_comboText Only:text_heavy_game"]
+
+model6_interaction_data$std_error <- c(audio_text_textheavy_se_m6, text_only_textheavy_se_m6) * 100 # Convert to percentage points
+model6_interaction_data$ci_lower <- model6_interaction_data$coefficient - 1.96 * model6_interaction_data$std_error
+model6_interaction_data$ci_upper <- model6_interaction_data$coefficient + 1.96 * model6_interaction_data$std_error
+
+# --- Create Model 5 Interaction Plot ---
+
+p_model5 <- ggplot(model5_interaction_data, aes(x = interaction_type, y = coefficient)) +
+  geom_col(fill = main_focus_color, alpha = 0.7, width = 0.6) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), 
+                width = 0.2, color = primary_very_dark_accent, size = 1) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed", alpha = 0.7) +
+  geom_text(aes(label = round(coefficient, 3)), 
+            vjust = ifelse(model5_interaction_data$coefficient > 0, -0.5, 1.5), 
+            color = primary_very_dark_accent, fontface = "bold", size = 4) +
+  labs(
+    title = "Model 5: Text-Heavy Game Interaction Effects",
+    subtitle = "Effect of Localisation Types on SC Review Proportion for Text-Heavy Games (Log-Odds Scale)",
+    x = "Interaction Term",
+    y = "Interaction Effect (Log-Odds)"
+  ) +
+  my_theme +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = rel(1.2))
+  )
+
+# --- Create Model 6 Interaction Plot ---
+
+p_model6 <- ggplot(model6_interaction_data, aes(x = interaction_type, y = coefficient)) +
+  geom_col(fill = main_focus_color, alpha = 0.7, width = 0.6) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), 
+                width = 0.2, color = primary_very_dark_accent, size = 1) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed", alpha = 0.7) +
+  geom_text(aes(label = paste0(round(coefficient, 2), " pp")), 
+            vjust = ifelse(model6_interaction_data$coefficient > 0, -0.5, 1.5), 
+            color = primary_very_dark_accent, fontface = "bold", size = 4) +
+  labs(
+    title = "Model 6: Text-Heavy Game Interaction Effects",
+    subtitle = "Effect of Localisation Types on Sentiment Gap for Text-Heavy Games (Percentage Points)",
+    x = "Interaction Term", 
+    y = "Interaction Effect (Percentage Points)"
+  ) +
+  my_theme +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = rel(1.2))
+  )
+
+# --- Alternative: Side-by-side Comparison Plot ---
+
+# Combine both datasets for comparison
+combined_interaction_data <- rbind(
+  model5_interaction_data %>% 
+    mutate(scale = "Log-Odds", 
+           coefficient_scaled = coefficient,
+           ci_lower_scaled = ci_lower,
+           ci_upper_scaled = ci_upper),
+  model6_interaction_data %>% 
+    mutate(scale = "Percentage Points",
+           coefficient_scaled = coefficient,
+           ci_lower_scaled = ci_lower,
+           ci_upper_scaled = ci_upper)
+)
+
+p_combined <- ggplot(combined_interaction_data, aes(x = interaction_type, y = coefficient_scaled, fill = scale)) +
+  geom_col(position = position_dodge(width = 0.8), alpha = 0.7, width = 0.7) +
+  geom_errorbar(aes(ymin = ci_lower_scaled, ymax = ci_upper_scaled), 
+                position = position_dodge(width = 0.8), width = 0.2, 
+                color = primary_very_dark_accent, linewidth = 0.8) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed", alpha = 0.7) +
+  scale_fill_manual(
+    name = "Model Type",
+    values = c("Log-Odds" = main_focus_color, "Percentage Points" = secondary_focus_color)
+  ) +
+  labs(
+    title = "Text-Heavy Game Interaction Effects: Models 5 & 6 Comparison", 
+    subtitle = "Additional effect magnitudes for localisation types on text-heavy games (with 95% confidence intervals)\nShows how much MORE effect localisation has for text-heavy vs. non-text-heavy games",
+    x = "Interaction Term",
+    y = "Additional Interaction Effect Magnitude"
+  ) +
+  my_theme +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right",
+    plot.title = element_text(size = rel(1.1))
+  ) +
+  facet_wrap(~ scale, scales = "free_y", ncol = 1, 
+             labeller = labeller(scale = c("Log-Odds" = "Model 5 (Beta Regression - Log-Odds)",
+                                           "Percentage Points" = "Model 6 (WLS Linear - Percentage Points)")))
+
+# --- Save Plots ---
+
+ggsave("model5_text_heavy_interaction_effects.png", p_model5, 
+       width = 10, height = 6, dpi = 300)
+
+ggsave("model6_text_heavy_interaction_effects.png", p_model6, 
+       width = 10, height = 6, dpi = 300)
+
+ggsave("combined_text_heavy_interaction_comparison.png", p_combined, 
+       width = 10, height = 10, dpi = 300)
+
+# Create side-by-side individual plots
+individual_plots <- grid.arrange(p_model5, p_model6, ncol = 1)
+ggsave("text_heavy_interaction_effects_side_by_side.png", individual_plots, 
+       width = 12, height = 12, dpi = 300)
+
+cat("\n=== TEXT-HEAVY INTERACTION PLOTS GENERATED SUCCESSFULLY ===\n")
+cat("Files created:\n")
+cat("- model5_text_heavy_interaction_effects.png\n")
+cat("- model6_text_heavy_interaction_effects.png\n") 
+cat("- combined_text_heavy_interaction_comparison.png\n")
+cat("- text_heavy_interaction_effects_side_by_side.png\n")
+
+# --- Extract Year Fixed Effects from Model 2 ---
+
+# Get coefficients from Model 2 (WLS Linear Model for Sentiment Gap)
+model2_coef <- coef(model2)
+model2_summary <- summary(model2)
+
+cat("Model 2 Coefficients - Year Fixed Effects:\n")
+
+# Extract year coefficients (convert to percentage points by multiplying by 100)
+# The reference year will have coefficient 0, others will be relative to reference
+year_coef_names <- names(model2_coef)[grepl("release_year", names(model2_coef))]
+cat("Year coefficient names found:", paste(year_coef_names, collapse = ", "), "\n")
+
+# Extract the years and their coefficients
+year_effects <- data.frame(
+  year_name = year_coef_names,
+  coefficient = model2_coef[year_coef_names] * 100, # Convert to percentage points
+  stringsAsFactors = FALSE
+)
+
+# Extract year numbers from the coefficient names
+year_effects$year <- as.numeric(gsub("release_year", "", year_effects$year_name))
+
+# Get standard errors for confidence intervals
+model2_se <- model2_summary$coefficients[, "Std. Error"]
+year_se <- model2_se[year_coef_names] * 100 # Convert to percentage points
+
+year_effects$std_error <- year_se
+year_effects$ci_lower <- year_effects$coefficient - 1.96 * year_effects$std_error
+year_effects$ci_upper <- year_effects$coefficient + 1.96 * year_effects$std_error
+
+# Find the reference year (will be the year NOT in the coefficients)
+all_years_in_data <- sort(unique(regression_data$release_year_numeric))
+reference_year <- all_years_in_data[!all_years_in_data %in% year_effects$year][1]
+cat("Reference year (coefficient = 0):", reference_year, "\n")
+
+# Add reference year to the data frame
+reference_row <- data.frame(
+  year_name = paste0("release_year", reference_year),
+  coefficient = 0,
+  year = reference_year,
+  std_error = 0,
+  ci_lower = 0,
+  ci_upper = 0
+)
+
+year_effects <- rbind(year_effects, reference_row)
+
+# Filter for years 2020-2025 as requested
+year_effects_filtered <- year_effects %>%
+  filter(year >= 2020 & year <= 2025) %>%
+  arrange(year)
+
+cat("\nYear Fixed Effects (2020-2025) in Percentage Points:\n")
+print(year_effects_filtered[, c("year", "coefficient", "ci_lower", "ci_upper")])
+
+# --- Create Year Fixed Effects Bar Chart ---
+
+cat("\nYear Fixed Effects (2020-2025) in Percentage Points:\n")
+print(year_effects_filtered[, c("year", "coefficient", "ci_lower", "ci_upper")])
+
+# Calculate label positions to avoid overlap - improved logic
+year_effects_filtered$label_y <- ifelse(
+  year_effects_filtered$coefficient >= -0.5, 
+  pmax(year_effects_filtered$ci_upper + 0.3, year_effects_filtered$coefficient + 0.3),
+  pmin(year_effects_filtered$ci_lower - 0.3, year_effects_filtered$coefficient - 0.3)
+)
+
+# Ensure label positions are within plot bounds
+year_effects_filtered$label_y <- pmax(year_effects_filtered$label_y, -10.8)
+year_effects_filtered$label_y <- pmin(year_effects_filtered$label_y, 0.3)
+
+# Create a simple factor for coloring instead of using specific colors
+year_effects_filtered$effect_type <- ifelse(
+  year_effects_filtered$coefficient >= 0, 
+  "Reference/Positive",
+  "Negative Effect"
+)
+
+# Create the plot with simplified color mapping
+p_year_effects <- ggplot(year_effects_filtered, aes(x = factor(year), y = coefficient, fill = effect_type)) +
+  geom_col(alpha = 0.9, width = 0.7, color = "white", linewidth = 0.5) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), 
+                width = 0.15, color = primary_very_dark_accent, linewidth = 1.2) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed", alpha = 0.8, linewidth = 1) +
+  geom_text(aes(x = factor(year), y = label_y, 
+                label = ifelse(coefficient == 0 & year == reference_year, 
+                               "0.00 (ref)", 
+                               paste0(sprintf("%.2f", coefficient), " pp"))), 
+            color = primary_very_dark_accent, fontface = "bold", size = 3.8) +
+  scale_fill_manual(
+    name = "Effect Type",
+    values = c("Reference/Positive" = comparison_color,
+               "Negative Effect" = main_focus_color),
+    guide = "none"  # Hide legend since it's explained in annotations
+  ) +
+  scale_y_continuous(
+    limits = c(-11, 0.05),
+    breaks = seq(-11, 0, by = 1),
+    labels = function(x) sprintf("%.1f", x),
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  scale_x_discrete(
+    labels = function(x) as.character(x)
+  ) +
+  labs(
+    title = "Dominant Negative Year Fixed Effects on Sentiment Gap",
+    subtitle = "General Association between Localisation and Player Engagement (Model 2)\nBars show year-specific effects on sentiment gap relative to reference year",
+    x = "Release Year",
+    y = "Year Fixed Effect on Sentiment Gap (Percentage Points)",
+    caption = paste0("Reference year: ", reference_year, " (coefficient = 0.00)")
+  ) +
+  my_theme +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = rel(1.0)),
+    axis.text.y = element_text(size = rel(0.9)),
+    plot.title = element_text(size = rel(1.2)),
+    plot.subtitle = element_text(size = rel(1.0)),
+    plot.caption = element_text(hjust = 0, color = "grey60"),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  ) +
+  annotate("text", x = 3.5, y = -1, 
+           label = "Negative effects indicate worsening\nsentiment gap over time", 
+           hjust = 0.5, size = 3.5, color = "darkred", fontface = "italic") +
+  annotate("text", x = 3.5, y = -10,
+           label = paste0("All effects relative to ", reference_year, " baseline"),
+           hjust = 0.5, size = 3.2, color = "grey50", fontface = "italic")
+
+# --- Save Plot ---
+
+ggsave("model2_year_fixed_effects_sentiment_gap.png", p_year_effects, 
+       width = 12, height = 8, dpi = 300)
+
+cat("\n=== YEAR FIXED EFFECTS ANALYSIS ===\n")
+cat("Model 2 Year Fixed Effects (2020-2025):\n")
+for(i in 1:nrow(year_effects_filtered)) {
+  row <- year_effects_filtered[i, ]
+  cat(sprintf("  %d: %+.2f pp [95%% CI: %.2f, %.2f]\n", 
+              row$year, row$coefficient, row$ci_lower, row$ci_upper))
+}
+
+# Calculate the trend
+cat(sprintf("\nReference Year: %d (coefficient = 0.00)\n", reference_year))
+cat("Interpretation:\n")
+cat("- Negative values = sentiment gap becomes more negative (worse) compared to reference year\n")
+cat("- Positive values = sentiment gap becomes more positive (better) compared to reference year\n")
+cat("- Magnitude shows percentage point change in sentiment gap\n")
+
+# Check if the pattern is predominantly negative
+negative_years <- sum(year_effects_filtered$coefficient < 0, na.rm = TRUE)
+total_non_ref_years <- sum(year_effects_filtered$coefficient != 0, na.rm = TRUE)
+
+cat(sprintf("\nPattern Analysis:\n"))
+cat(sprintf("- %d out of %d years show negative effects (%.1f%%)\n", 
+            negative_years, total_non_ref_years, 
+            (negative_years/total_non_ref_years)*100))
+cat(sprintf("- Average effect across non-reference years: %.2f pp\n", 
+            mean(year_effects_filtered$coefficient[year_effects_filtered$coefficient != 0])))
+
+cat("\n=== YEAR FIXED EFFECTS BAR CHART GENERATED ===\n")
+cat("File created: model2_year_fixed_effects_sentiment_gap.png\n")
